@@ -7,23 +7,19 @@
     <!-- 🔴 BLUETOOTH PERMISSION -->
     <!-- ================================================== -->
 
-    <!-- Android ต่ำกว่า 12 -->
     <uses-permission android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
         android:maxSdkVersion="30"/>
 
-    <!-- Android 12+ -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation"/>
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"/>
 
-    <!-- Android ต่ำกว่า 12 (scan BT ต้องใช้ location) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
         android:maxSdkVersion="30"/>
 
-    <!-- 🔴 Android 13+ ต้องมี (สำคัญกับ foreground service notification) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <!-- ================================================== -->
@@ -49,9 +45,9 @@
         android:theme="@style/Theme.TNMower"
         tools:targetApi="33">
 
-        <!-- 🔴 MAIN ACTIVITY -->
+        <!-- 🔴 FIX: ใช้ full path -->
         <activity
-            android:name=".MainActivity"
+            android:name="com.tnmower.tnmower.MainActivity"
             android:exported="true">
 
             <intent-filter>
@@ -61,13 +57,11 @@
 
         </activity>
 
-        <!-- 🔴 BLUETOOTH SERVICE -->
         <service
-            android:name=".BluetoothService"
+            android:name="com.tnmower.tnmower.BluetoothService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
 
     </application>
 
 </manifest>
-

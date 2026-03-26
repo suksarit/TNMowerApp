@@ -1,7 +1,7 @@
 package com.tnmower.tnmower;
 
 import android.Manifest;
-import android.annotation.SuppressLint; // 🔴 เพิ่มตรงนี้
+import android.annotation.SuppressLint;
 import android.content.*;
 import android.content.pm.PackageManager;
 import android.os.Build;
@@ -112,9 +112,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ==================================================
-    // REGISTER RECEIVER (🔴 FIX LINT 100%)
+    // REGISTER RECEIVER
     // ==================================================
-    @SuppressLint("UnspecifiedRegisterReceiverFlag") // 🔴 ตัวจบปัญหา
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     @Override
     protected void onResume() {
         super.onResume();
