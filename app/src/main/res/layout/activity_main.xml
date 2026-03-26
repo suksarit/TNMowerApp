@@ -1,0 +1,73 @@
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:padding="16dp"
+    android:background="#121212"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <!-- CONNECT -->
+        <Button
+            android:id="@+id/btnConnect"
+            android:text="CONNECT"
+            android:textSize="18sp"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"/>
+
+        <!-- EMERGENCY STOP (ต้องเด่นสุด) -->
+        <Button
+            android:id="@+id/btnStop"
+            android:text="EMERGENCY STOP"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:backgroundTint="#FF0000"
+            android:textColor="#FFFFFF"
+            android:layout_width="match_parent"
+            android:layout_height="80dp"
+            android:layout_marginTop="12dp"/>
+
+        <!-- STATUS -->
+        <TextView
+            android:id="@+id/txtStatus"
+            android:text="Status: Disconnected"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:layout_marginTop="20dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+        <!-- VOLT -->
+        <TextView
+            android:id="@+id/txtVolt"
+            android:text="Volt: -"
+            android:textColor="#00FF00"
+            android:textSize="18sp"
+            android:layout_marginTop="16dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+        <!-- CURRENT -->
+        <TextView
+            android:id="@+id/txtCurrent"
+            android:text="Current: -"
+            android:textColor="#FFFF00"
+            android:textSize="18sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+        <!-- TEMP -->
+        <TextView
+            android:id="@+id/txtTemp"
+            android:text="Temp: -"
+            android:textColor="#FF8800"
+            android:textSize="18sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+    </LinearLayout>
+
+</ScrollView>
+
