@@ -1,22 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    package="com.tnmower.tnmower">
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- ================================================== -->
     <!-- 🔴 BLUETOOTH PERMISSION -->
     <!-- ================================================== -->
 
-    <!-- Android 11 ลงไป -->
+    <!-- Android 11 และต่ำกว่า -->
     <uses-permission android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
         android:maxSdkVersion="30"/>
 
     <!-- Android 12+ -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"/>
 
     <!-- Android 13+ -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
@@ -44,7 +46,9 @@
         android:theme="@style/Theme.TNMower"
         tools:targetApi="33">
 
+        <!-- ========================= -->
         <!-- MAIN ACTIVITY -->
+        <!-- ========================= -->
         <activity
             android:name=".ui.MainActivity"
             android:exported="true">
@@ -56,7 +60,16 @@
 
         </activity>
 
+        <!-- ========================= -->
+        <!-- 🔴 DEVICE LIST (เพิ่มใหม่) -->
+        <!-- ========================= -->
+        <activity
+            android:name=".ui.DeviceListActivity"
+            android:exported="false" />
+
+        <!-- ========================= -->
         <!-- BLUETOOTH SERVICE -->
+        <!-- ========================= -->
         <service
             android:name=".bluetooth.BluetoothService"
             android:exported="false"

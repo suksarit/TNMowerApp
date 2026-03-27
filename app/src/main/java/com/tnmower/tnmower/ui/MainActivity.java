@@ -1,11 +1,14 @@
 package com.tnmower.tnmower.ui;
 
-import android.Manifest;
-import android.annotation.SuppressLint;
-import android.content.*;
-import android.content.pm.PackageManager;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.SharedPreferences;
+import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.widget.Button;
 import android.widget.TextView;
 
@@ -16,153 +19,264 @@ import com.tnmower.tnmower.bluetooth.BluetoothService;
 
 public class MainActivity extends AppCompatActivity {
 
-    private TextView txtStatus, txtVolt, txtCurrent, txtTemp;
+    private GaugeView gaugeVolt;
+    private GaugeView gaugeCurrent;
+    private GaugeView gaugeTemp;
 
-    // ==================================================
-    // RECEIVER: TELEMETRY
-    // ==================================================
-    private final BroadcastReceiver telemetryReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
+    private TextView txtVolt;
+    private TextView txtCurrent;
+    private TextView txtTemp;
+    private TextView txtStatus;
 
-            float volt = intent.getFloatExtra("volt", 0);
-            float current = intent.getFloatExtra("current", 0);
-            float temp = intent.getFloatExtra("temp", 0);
+    private Button btnConnect;
+    private Button btnDisconnect;
+    private Button btnStop;
 
-            txtVolt.setText("Volt: " + volt);
-            txtCurrent.setText("Current: " + current);
-            txtTemp.setText("Temp: " + temp);
-        }
-    };
+    private static final int REQ_BT = 100;
+    private String selectedMAC = "";
 
-    // ==================================================
-    // RECEIVER: STATUS
-    // ==================================================
+    private float targetVolt = 0;
+    private float targetCurrent = 0;
+    private float targetTemp = 0;
+
+    private float displayVolt = 0;
+    private float displayCurrent = 0;
+    private float displayTemp = 0;
+
+    // 🔴 FIX: ใช้ field + คุม loop
+    private final Handler handler = new Handler();
+    private boolean isLoopRunning = false;
+
+    private boolean fault = false;
+    private boolean warning = false;
+
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-
             String status = intent.getStringExtra("status");
-            if (status == null) return;
-
-            txtStatus.setText("Status: " + status);
+            updateStatusText(status);
         }
     };
 
-    // ==================================================
-    // onCreate
-    // ==================================================
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
         setContentView(R.layout.activity_main);
 
-        txtStatus = findViewById(R.id.txtStatus);
+        SharedPreferences sp = getSharedPreferences("TN_MOWER", MODE_PRIVATE);
+        selectedMAC = sp.getString("MAC", "");
+
+        gaugeVolt = findViewById(R.id.gaugeVolt);
+        gaugeCurrent = findViewById(R.id.gaugeCurrent);
+        gaugeTemp = findViewById(R.id.gaugeTemp);
+
         txtVolt = findViewById(R.id.txtVolt);
         txtCurrent = findViewById(R.id.txtCurrent);
         txtTemp = findViewById(R.id.txtTemp);
+        txtStatus = findViewById(R.id.txtStatus);
 
-        Button btnConnect = findViewById(R.id.btnConnect);
-        Button btnStop = findViewById(R.id.btnStop);
+        btnConnect = findViewById(R.id.btnConnect);
+        btnDisconnect = findViewById(R.id.btnDisconnect);
+        btnStop = findViewById(R.id.btnStop);
 
-        // ==================================================
-        // PERMISSION Android 12+
-        // ==================================================
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
-                    != PackageManager.PERMISSION_GRANTED) {
+        txtStatus.setText(getString(R.string.status_disconnected));
 
-                requestPermissions(new String[]{
-                        Manifest.permission.BLUETOOTH_CONNECT,
-                        Manifest.permission.BLUETOOTH_SCAN
-                }, 1);
-            }
-        }
+        gaugeVolt.setMaxValue(30);
+        gaugeCurrent.setMaxValue(50);
+        gaugeTemp.setMaxValue(120);
 
-        // ==================================================
-        // Android 13 Notification
-        // ==================================================
-        if (Build.VERSION.SDK_INT >= 33) {
-            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                    != PackageManager.PERMISSION_GRANTED) {
-
-                requestPermissions(new String[]{
-                        Manifest.permission.POST_NOTIFICATIONS
-                }, 2);
-            }
-        }
-
-        // ==================================================
-        // START SERVICE (แก้ API 26)
-        // ==================================================
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(new Intent(this, BluetoothService.class));
-        } else {
-            startService(new Intent(this, BluetoothService.class));
-        }
-
-        // ==================================================
-        // BUTTON CONNECT (แก้ API 26)
-        // ==================================================
         btnConnect.setOnClickListener(v -> {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(new Intent(this, BluetoothService.class));
+            if (selectedMAC.isEmpty()) {
+                Intent i = new Intent(this, DeviceListActivity.class);
+                startActivityForResult(i, REQ_BT);
             } else {
-                startService(new Intent(this, BluetoothService.class));
+                startBluetooth(selectedMAC);
             }
         });
 
-        // ==================================================
-        // BUTTON STOP
-        // ==================================================
-        btnStop.setOnClickListener(v -> {
+        btnDisconnect.setOnClickListener(v -> {
             Intent intent = new Intent(this, BluetoothService.class);
-            intent.putExtra("cmd", "STOP");
-            startService(intent);
+            stopService(intent);
+            updateStatusText("DISCONNECTED");
+        });
+
+        btnStop.setOnClickListener(v -> sendStopCommand());
+
+        BluetoothService.setTelemetryListener((volt, current, temp) -> {
+
+            fault = false;
+            warning = false;
+
+            if (volt < 0 || volt > 30) fault = true;
+            if (current < 0 || current > 50) fault = true;
+
+            if (temp > 120) fault = true;
+            else if (temp > 100) warning = true;
+
+            if (!fault) {
+                targetVolt = clamp(volt, 0, 30);
+                targetCurrent = clamp(current, 0, 50);
+                targetTemp = clamp(temp, 0, 120);
+            }
+
+            runOnUiThread(this::updateStatusUI);
+        });
+
+        // 🔴 เริ่ม loop ครั้งแรก
+        startSmoothLoop();
+
+        if (!selectedMAC.isEmpty()) {
+            startBluetooth(selectedMAC);
+        }
+    }
+
+    private void startBluetooth(String mac) {
+
+        selectedMAC = mac;
+
+        SharedPreferences sp = getSharedPreferences("TN_MOWER", MODE_PRIVATE);
+        sp.edit().putString("MAC", mac).apply();
+
+        Intent intent = new Intent(this, BluetoothService.class);
+        intent.putExtra("MAC", mac);
+        startService(intent);
+
+        updateStatusText("CONNECTING");
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == REQ_BT && resultCode == RESULT_OK) {
+            String mac = data.getStringExtra("MAC");
+            startBluetooth(mac);
+        }
+    }
+
+    private void updateStatusText(String status) {
+
+        runOnUiThread(() -> {
+
+            switch (status) {
+
+                case "CONNECTING":
+                case "RECONNECTING":
+                    txtStatus.setText(getString(R.string.status_connecting));
+                    txtStatus.setTextColor(Color.YELLOW);
+                    break;
+
+                case "CONNECTED":
+                    txtStatus.setText(getString(R.string.status_connected));
+                    txtStatus.setTextColor(Color.GREEN);
+                    break;
+
+                case "TIMEOUT":
+                    txtStatus.setText("หมดเวลา");
+                    txtStatus.setTextColor(Color.RED);
+                    break;
+
+                case "DISCONNECTED":
+                    txtStatus.setText(getString(R.string.status_disconnected));
+                    txtStatus.setTextColor(Color.GRAY);
+                    break;
+            }
         });
     }
 
-    // ==================================================
-    // REGISTER RECEIVER
-    // ==================================================
-    @SuppressLint("UnspecifiedRegisterReceiverFlag")
+    // 🔴 FIX LOOP ตัวจริง
+    private void startSmoothLoop() {
+
+        if (isLoopRunning) return;
+
+        isLoopRunning = true;
+
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+
+                if (!isLoopRunning) return;
+
+                float alpha = 0.1f;
+
+                displayVolt += (targetVolt - displayVolt) * alpha;
+                displayCurrent += (targetCurrent - displayCurrent) * alpha;
+                displayTemp += (targetTemp - displayTemp) * alpha;
+
+                updateGauge();
+
+                handler.postDelayed(this, 16);
+            }
+        }, 100);
+    }
+
+    private void stopSmoothLoop() {
+        isLoopRunning = false;
+        handler.removeCallbacksAndMessages(null);
+    }
+
+    private void updateGauge() {
+
+        gaugeVolt.setValue(displayVolt);
+        gaugeCurrent.setValue(displayCurrent);
+        gaugeTemp.setValue(displayTemp);
+
+        txtVolt.setText(String.format(getString(R.string.format_voltage), displayVolt));
+        txtCurrent.setText(String.format(getString(R.string.format_current), displayCurrent));
+        txtTemp.setText(String.format(getString(R.string.format_temp), displayTemp));
+    }
+
+    private void updateStatusUI() {
+
+        if (fault) {
+            txtStatus.setText("ผิดปกติ !");
+            txtStatus.setTextColor(Color.RED);
+        }
+        else if (warning) {
+            txtStatus.setText("เตือน !");
+            txtStatus.setTextColor(Color.YELLOW);
+        }
+        else {
+            txtStatus.setText(getString(R.string.status_connected));
+            txtStatus.setTextColor(Color.GREEN);
+        }
+    }
+
+    private void sendStopCommand() {
+        try {
+            Intent intent = new Intent(this, BluetoothService.class);
+            intent.putExtra("cmd", "STOP");
+            startService(intent);
+        } catch (Exception ignored) {}
+    }
+
+    private float clamp(float val, float min, float max) {
+        return Math.max(min, Math.min(max, val));
+    }
+
+    @SuppressWarnings("UnspecifiedRegisterReceiverFlag")
     @Override
     protected void onResume() {
         super.onResume();
 
-        IntentFilter telFilter = new IntentFilter("TNMOWER_TELEMETRY");
-        IntentFilter statFilter = new IntentFilter("TNMOWER_STATUS");
+        startSmoothLoop(); // 🔴 เริ่ม loop
 
-        if (Build.VERSION.SDK_INT >= 33) {
+        IntentFilter filter = new IntentFilter("TNMOWER_STATUS");
 
-            registerReceiver(
-                    telemetryReceiver,
-                    telFilter,
-                    Context.RECEIVER_NOT_EXPORTED
-            );
-
-            registerReceiver(
-                    statusReceiver,
-                    statFilter,
-                    Context.RECEIVER_NOT_EXPORTED
-            );
-
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(statusReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         } else {
-
-            registerReceiver(telemetryReceiver, telFilter);
-            registerReceiver(statusReceiver, statFilter);
+            registerReceiver(statusReceiver, filter);
         }
     }
 
-    // ==================================================
-    // UNREGISTER RECEIVER
-    // ==================================================
     @Override
     protected void onPause() {
         super.onPause();
 
-        try { unregisterReceiver(telemetryReceiver); } catch (Exception ignored) {}
-        try { unregisterReceiver(statusReceiver); } catch (Exception ignored) {}
+        stopSmoothLoop(); // 🔴 หยุด loop
+
+        unregisterReceiver(statusReceiver);
     }
 }
-

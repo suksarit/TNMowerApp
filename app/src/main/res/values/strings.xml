@@ -1,3 +1,43 @@
 <resources>
+
+    <!-- ========================= -->
+    <!-- ชื่อแอป -->
+    <!-- ========================= -->
     <string name="app_name">TN Mower</string>
+
+    <!-- ========================= -->
+    <!-- ปุ่ม -->
+    <!-- ========================= -->
+    <string name="btn_connect">เชื่อมต่อ</string>
+    <string name="btn_disconnect">ตัดการเชื่อมต่อ</string>
+    <string name="btn_emergency">หยุดฉุกเฉิน</string>
+
+    <!-- ========================= -->
+    <!-- สถานะ -->
+    <!-- ========================= -->
+    <string name="status_disconnected">สถานะ: ไม่ได้เชื่อมต่อ</string>
+    <string name="status_connected">สถานะ: เชื่อมต่อแล้ว</string>
+    <string name="status_connecting">สถานะ: กำลังเชื่อมต่อ...</string>
+
+    <!-- ========================= -->
+    <!-- ค่าต่าง ๆ -->
+    <!-- ========================= -->
+    <string name="label_voltage">แรงดัน</string>
+    <string name="label_current">กระแส</string>
+    <string name="label_temp">อุณหภูมิ</string>
+
+    <!-- ========================= -->
+    <!-- หน่วย -->
+    <!-- ========================= -->
+    <string name="unit_volt">V</string>
+    <string name="unit_amp">A</string>
+    <string name="unit_temp">°C</string>
+
+    <!-- ========================= -->
+    <!-- รูปแบบข้อความ (ใช้กับ Java/Kotlin) -->
+    <!-- ========================= -->
+    <string name="format_voltage">%1$.1f V</string>
+    <string name="format_current">%1$.1f A</string>
+    <string name="format_temp">%1$.1f °C</string>
+
 </resources>

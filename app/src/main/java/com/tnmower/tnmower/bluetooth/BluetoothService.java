@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.Manifest;
 import android.os.*;
+
 import androidx.core.app.NotificationCompat;
 
 import com.tnmower.tnmower.utils.CRCUtil;
@@ -36,6 +37,36 @@ public class BluetoothService extends Service {
     private final LinkedBlockingQueue<String> txQueue = new LinkedBlockingQueue<>();
 
     private int seq = 0;
+
+    // =========================
+    // STATUS TRACK
+    // =========================
+    private String lastStatus = "";
+
+    // =========================
+    // RECONNECT
+    // =========================
+    private long lastConnectAttempt = 0;
+    private int reconnectDelay = 2000;
+
+    // =========================
+    // TIMEOUT
+    // =========================
+    private long lastRxTime = 0;
+    private static final long RX_TIMEOUT = 3000;
+
+    // =========================
+    // LISTENER
+    // =========================
+    public interface OnTelemetryListener {
+        void onTelemetry(float volt, float current, float temp);
+    }
+
+    private static OnTelemetryListener telemetryListener;
+
+    public static void setTelemetryListener(OnTelemetryListener listener) {
+        telemetryListener = listener;
+    }
 
     // ==================================================
     @Override
@@ -91,27 +122,39 @@ public class BluetoothService extends Service {
     }
 
     // ==================================================
-    // 🔴 AUTO RECONNECT LOOP (แก้แล้ว)
-    // ==================================================
     private void connectionLoop() {
 
         while (running.get()) {
 
-            if (!connected.get()) {
+            long now = System.currentTimeMillis();
 
-                sendStatus("RECONNECTING");
-
-                connect();
-
-                SystemClock.sleep(3000); // รอ 3 วิ
+            // 🔴 TIMEOUT → ตัดจริง
+            if (connected.get() && (now - lastRxTime > RX_TIMEOUT)) {
+                sendStatus("TIMEOUT");
+                connected.set(false);
+                safeClose();
             }
 
-            SystemClock.sleep(500);
+            // 🔴 CONNECT / RECONNECT
+            if (!connected.get()) {
+
+                if (now - lastConnectAttempt > reconnectDelay) {
+
+                    lastConnectAttempt = now;
+
+                    connect();
+
+                    reconnectDelay = Math.min(reconnectDelay + 1000, 8000);
+                }
+
+            } else {
+                reconnectDelay = 2000;
+            }
+
+            SystemClock.sleep(300);
         }
     }
 
-    // ==================================================
-    // 🔴 CONNECT (แก้แล้ว)
     // ==================================================
     private void connect() {
 
@@ -139,6 +182,7 @@ public class BluetoothService extends Service {
             output = socket.getOutputStream();
 
             connected.set(true);
+            lastRxTime = System.currentTimeMillis();
 
             sendStatus("CONNECTED");
 
@@ -147,15 +191,11 @@ public class BluetoothService extends Service {
         } catch (Exception e) {
 
             connected.set(false);
-
-            sendStatus("DISCONNECTED");
-
+            sendStatus("RECONNECTING");
             safeClose();
         }
     }
 
-    // ==================================================
-    // 🔴 RX LOOP (แก้แล้ว)
     // ==================================================
     private void rxLoop() {
 
@@ -172,38 +212,24 @@ public class BluetoothService extends Service {
                 buffer.append((char) c);
 
                 if (c == '>') {
-                    handlePacket(buffer.toString());
+
+                    String packet = buffer.toString();
                     buffer.setLength(0);
+
+                    lastRxTime = System.currentTimeMillis();
+
+                    handlePacket(packet);
                 }
+
+                if (buffer.length() > 200) buffer.setLength(0);
 
             } catch (Exception e) {
 
                 connected.set(false);
-
-                sendStatus("LOST_CONNECTION");
-
+                sendStatus("RECONNECTING");
                 safeClose();
-
                 break;
             }
-        }
-    }
-
-    // ==================================================
-    private void txLoop() {
-
-        while (running.get()) {
-
-            try {
-
-                String msg = txQueue.take();
-
-                if (connected.get() && output != null) {
-                    output.write(msg.getBytes());
-                    output.flush();
-                }
-
-            } catch (Exception ignored) {}
         }
     }
 
@@ -235,15 +261,30 @@ public class BluetoothService extends Service {
                 float current = Float.parseFloat(d[1].split(":")[1]);
                 float temp = Float.parseFloat(d[2].split(":")[1]);
 
-                Intent intent = new Intent("TNMOWER_TELEMETRY");
-                intent.putExtra("volt", volt);
-                intent.putExtra("current", current);
-                intent.putExtra("temp", temp);
-
-                sendBroadcast(intent);
+                if (telemetryListener != null) {
+                    telemetryListener.onTelemetry(volt, current, temp);
+                }
             }
 
         } catch (Exception ignored) {}
+    }
+
+    // ==================================================
+    private void txLoop() {
+
+        while (running.get()) {
+
+            try {
+
+                String msg = txQueue.take();
+
+                if (connected.get() && output != null) {
+                    output.write(msg.getBytes());
+                    output.flush();
+                }
+
+            } catch (Exception ignored) {}
+        }
     }
 
     // ==================================================
@@ -252,7 +293,6 @@ public class BluetoothService extends Service {
         seq++;
 
         String raw = seq + "," + type + "," + data;
-
         String crc = CRCUtil.calcCRC(raw);
 
         String packet = "<" + raw + "," + crc + ">";
@@ -260,7 +300,12 @@ public class BluetoothService extends Service {
     }
 
     // ==================================================
+    // 🔴 FIX: กันยิง status ซ้ำ
     private void sendStatus(String status) {
+
+        if (status.equals(lastStatus)) return;
+
+        lastStatus = status;
 
         Intent intent = new Intent("TNMOWER_STATUS");
         intent.putExtra("status", status);
@@ -280,6 +325,7 @@ public class BluetoothService extends Service {
         running.set(false);
         connected.set(false);
         safeClose();
+        sendStatus("DISCONNECTED");
         super.onDestroy();
     }
 
@@ -288,4 +334,3 @@ public class BluetoothService extends Service {
         return null;
     }
 }
-
