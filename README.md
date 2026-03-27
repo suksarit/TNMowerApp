@@ -84,17 +84,40 @@ private final String MAC = "00:21:13:00:00:00";
 
 ## 🧠 โครงสร้างโปรเจกต์
 
-```
 app/
- ├── java/com/tnmower/tnmower/
- │    ├── MainActivity.java
- │    └── BluetoothService.java
- ├── res/
- │    ├── layout/
- │    └── drawable/
- └── AndroidManifest.xml
-```
-
+ ├── src/
+ │    ├── main/
+ │    │    ├── java/com/tnmower/tnmower/
+ │    │    │    ├── ui/
+ │    │    │    │    ├── MainActivity.java
+ │    │    │    │    └── GaugeView.java
+ │    │    │    │
+ │    │    │    ├── bluetooth/
+ │    │    │    │    └── BluetoothService.java
+ │    │    │    │
+ │    │    │    └── utils/
+ │    │    │         └── CRCUtil.java
+ │    │    │
+ │    │    ├── res/
+ │    │    │    ├── layout/
+ │    │    │    │    └── activity_main.xml
+ │    │    │    │
+ │    │    │    ├── drawable/
+ │    │    │    │    └── (background / shape ต่าง ๆ)
+ │    │    │    │
+ │    │    │    ├── values/
+ │    │    │    │    ├── strings.xml
+ │    │    │    │    ├── colors.xml
+ │    │    │    │    └── themes.xml
+ │    │    │    │
+ │    │    │    └── values-th/
+ │    │    │         └── strings.xml   ← ภาษาไทย
+ │    │    │
+ │    │    └── AndroidManifest.xml
+ │    │
+ │    └── test/
+ │
+ └── build.gradle
 ---
 
 ## ⚠️ หมายเหตุสำคัญ
