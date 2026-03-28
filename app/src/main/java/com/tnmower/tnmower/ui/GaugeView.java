@@ -11,6 +11,7 @@ public class GaugeView extends View {
 
     private float value = 0f;
     private float displayValue = 0f;
+    private float velocity = 0f;        // 🔴 inertia จริง
     private float peakValue = 0f;
 
     private float minValue = 0f;
@@ -53,20 +54,24 @@ public class GaugeView extends View {
 
         rimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         rimPaint.setStyle(Paint.Style.STROKE);
-        rimPaint.setColor(Color.argb(180, 255, 255, 255));
+        rimPaint.setColor(Color.argb(200, 255, 255, 255));
+
+        // 🔴 เงาขอบจริง
+        rimPaint.setShadowLayer(20, 0, 0, Color.BLACK);
+        setLayerType(LAYER_TYPE_SOFTWARE, rimPaint);
 
         // =========================
-        // NEEDLE (ปรับใหม่)
+        // NEEDLE
         // =========================
         needlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         needlePaint.setColor(Color.WHITE);
-        needlePaint.setStrokeWidth(8f); // 🔴 หนาขึ้น
+        needlePaint.setStrokeWidth(10f);
 
         centerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         centerPaint.setColor(Color.WHITE);
 
         // =========================
-        // TICK (ปรับให้ชัด)
+        // TICK
         // =========================
         tickPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         tickPaint.setColor(Color.LTGRAY);
@@ -97,10 +102,6 @@ public class GaugeView extends View {
         postInvalidate();
     }
 
-    public void resetPeak() {
-        peakValue = value;
-    }
-
     public void setUnit(String unit) {
         this.unit = unit;
     }
@@ -114,7 +115,7 @@ public class GaugeView extends View {
 
         bgPaint.setStrokeWidth(strokeWidth);
         fgPaint.setStrokeWidth(strokeWidth);
-        glowPaint.setStrokeWidth(strokeWidth + 8);
+        glowPaint.setStrokeWidth(strokeWidth + 10);
         rimPaint.setStrokeWidth(strokeWidth * 0.4f);
 
         textPaint.setTextSize(size * 0.22f);
@@ -126,18 +127,22 @@ public class GaugeView extends View {
 
         int w = getWidth();
         int h = getHeight();
-
         if (w == 0 || h == 0) return;
 
         // =========================
-        // INERTIA
+        // 🔴 REAL INERTIA
         // =========================
         if (isPreview) {
             displayValue = 50;
-            peakValue = 70f;
+            peakValue = 70;
         } else {
-            displayValue += (value - displayValue) * 0.08f;
+            float force = (value - displayValue) * 0.15f;
+            velocity = velocity * 0.85f + force;
+            displayValue += velocity;
         }
+
+        // 🔴 PEAK DECAY
+        peakValue -= (peakValue - displayValue) * 0.02f;
 
         int padding = (int)(strokeWidth);
         int size = Math.min(w, h) - padding * 2;
@@ -165,12 +170,12 @@ public class GaugeView extends View {
 
         fgPaint.setColor(color);
         glowPaint.setColor(color);
-        glowPaint.setAlpha(140);
+        glowPaint.setAlpha(150);
 
-        // FLASH
+        // 🔴 FLASH RED
         if (percent > 0.9f) {
             long now = System.currentTimeMillis();
-            if (now - lastFlashTime > 300) {
+            if (now - lastFlashTime > 250) {
                 flashState = !flashState;
                 lastFlashTime = now;
             }
@@ -184,13 +189,12 @@ public class GaugeView extends View {
         canvas.drawArc(rect, 180, 180, false, bgPaint);
 
         // =========================
-        // TICKS (ชัดขึ้น)
+        // TICKS
         // =========================
         for (int i = 0; i <= 10; i++) {
 
             float angle = (float)Math.toRadians(180 + i * 18);
-
-            float len = (i % 5 == 0) ? 40 : 25; // 🔴 major/minor
+            float len = (i % 5 == 0) ? 40 : 25;
 
             float x1 = w/2f + (size/2f - 10) * (float)Math.cos(angle);
             float y1 = h/2f + (size/2f - 10) * (float)Math.sin(angle);
@@ -208,7 +212,7 @@ public class GaugeView extends View {
         canvas.drawArc(rect, 180, percent * 180f, false, fgPaint);
 
         // =========================
-        // NEEDLE (ปรับใหม่)
+        // NEEDLE
         // =========================
         float angle = (float)Math.toRadians(180 + percent * 180f);
 
@@ -216,12 +220,10 @@ public class GaugeView extends View {
         float ny = h/2f + (size/2f - 50) * (float)Math.sin(angle);
 
         canvas.drawLine(w/2f, h/2f, nx, ny, needlePaint);
-
-        // 🔴 หัวเข็ม
-        canvas.drawCircle(w/2f, h/2f, 10, centerPaint);
+        canvas.drawCircle(w/2f, h/2f, 12, centerPaint);
 
         // =========================
-        // PEAK (เด่นขึ้น)
+        // PEAK
         // =========================
         float pAngle = (float)Math.toRadians(180 + peakPercent * 180f);
 

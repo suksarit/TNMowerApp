@@ -53,11 +53,30 @@ public class MainActivity extends AppCompatActivity {
 
     private Vibrator vibrator;
 
+    // ===============================
+    // 🔴 FIX: รับสถานะ + reconnect
+    // ===============================
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+
             String status = intent.getStringExtra("status");
+
+            if ("CONNECTED".equals(status)) {
+                connected = true;
+                connecting = false;
+                reconnectAttempts = 0;
+                stopReconnect();
+            }
+
+            if ("DISCONNECTED".equals(status)) {
+                connected = false;
+                connecting = false;
+                scheduleReconnect(); // 🔥 reconnect จริง
+            }
+
             updateStatusText(status);
+            updateButtonState();
         }
     };
 
@@ -128,6 +147,9 @@ public class MainActivity extends AppCompatActivity {
 
         btnStop.setOnClickListener(v -> sendStopCommand());
 
+        // ===============================
+        // 🔴 TELEMETRY
+        // ===============================
         BluetoothService.setTelemetryListener((volt, m1, m2, m3, m4, tL, tR) -> {
 
             this.m1 = m1;
@@ -146,7 +168,7 @@ public class MainActivity extends AppCompatActivity {
 
             runOnUiThread(() -> {
                 updateTempText();
-                updateMotorText();
+                updateMotorText(); // 🔥 logic ใหม่อยู่ตรงนี้
                 checkDanger();
             });
         });
@@ -159,9 +181,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ===============================
-    // 🔴 FIX: ฟังก์ชันที่หาย
+    // 🔴 CONNECT + TIMEOUT
     // ===============================
-
     private void startBluetooth(String mac) {
 
         if (connecting) return;
@@ -181,11 +202,32 @@ public class MainActivity extends AppCompatActivity {
         new Handler().postDelayed(() -> {
             if (!connected) {
                 connecting = false;
+
                 txtStatus.setText("เชื่อมต่อไม่สำเร็จ");
                 txtStatus.setTextColor(Color.RED);
+
+                scheduleReconnect(); // 🔥 สำคัญ
                 updateButtonState();
             }
         }, CONNECT_TIMEOUT);
+    }
+
+    // ===============================
+    // 🔴 RECONNECT
+    // ===============================
+    private void scheduleReconnect() {
+
+        if (reconnectAttempts >= MAX_RECONNECT) return;
+
+        reconnectAttempts++;
+
+        reconnectRunnable = () -> {
+            if (!connected && !connecting) {
+                startBluetooth(selectedMAC);
+            }
+        };
+
+        reconnectHandler.postDelayed(reconnectRunnable, RECONNECT_DELAY);
     }
 
     private void stopReconnect() {
@@ -195,6 +237,9 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // ===============================
+    // 🔴 SMOOTH LOOP
+    // ===============================
     private void startSmoothLoop() {
 
         if (isLoopRunning) return;
@@ -242,7 +287,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ===============================
-    // 🔴 MOTOR LOGIC
+    // 🔴 MOTOR + ALERT + HIGHLIGHT
     // ===============================
     private void updateMotorText() {
 
@@ -253,15 +298,42 @@ public class MainActivity extends AppCompatActivity {
 
         float limit = 30f;
 
-        txtM1.setTextColor(m1 > limit ? Color.RED : Color.WHITE);
-        txtM2.setTextColor(m2 > limit ? Color.RED : Color.WHITE);
-        txtM3.setTextColor(m3 > limit ? Color.RED : Color.WHITE);
-        txtM4.setTextColor(m4 > limit ? Color.RED : Color.WHITE);
+        boolean m1Over = m1 > limit;
+        boolean m2Over = m2 > limit;
+        boolean m3Over = m3 > limit;
+        boolean m4Over = m4 > limit;
+
+        txtM1.setTextColor(m1Over ? Color.RED : Color.WHITE);
+        txtM2.setTextColor(m2Over ? Color.RED : Color.WHITE);
+        txtM3.setTextColor(m3Over ? Color.RED : Color.WHITE);
+        txtM4.setTextColor(m4Over ? Color.RED : Color.WHITE);
+
+        // 🔴 highlight ฝั่งด้วยค่า (ไม่ใช่ setColor)
+        float leftSum = m1 + m2;
+        float rightSum = m3 + m4;
+
+        gaugeCurrentL.setValue(leftSum);
+        gaugeCurrentR.setValue(rightSum);
+
+        // 🔴 แจ้งเตือน
+        if (m1Over || m2Over || m3Over || m4Over) {
+            vibrateAlert();
+        }
+    }
+
+    private void vibrateAlert() {
+        if (vibrator == null) return;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE));
+        } else {
+            vibrator.vibrate(200);
+        }
     }
 
     private void checkDanger() {
-        if ((tempL > 80 || tempR > 80) && vibrator != null) {
-            vibrator.vibrate(200);
+        if ((tempL > 80 || tempR > 80)) {
+            vibrateAlert();
         }
     }
 
@@ -315,3 +387,4 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 }
+

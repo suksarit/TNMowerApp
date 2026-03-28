@@ -4,7 +4,7 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="#121212"
-    android:padding="6dp">
+    android:padding="8dp">
 
     <!-- STATUS -->
     <TextView
@@ -14,15 +14,17 @@
         android:text="สถานะ: ไม่ได้เชื่อมต่อ"
         android:textColor="#FFFFFF"
         android:textSize="13sp"
-        android:paddingBottom="4dp"/>
+        android:paddingBottom="6dp"/>
 
     <!-- VOLT -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="2"
-        android:gravity="center"
-        android:orientation="vertical">
+        android:orientation="vertical"
+        android:background="#1E1E1E"
+        android:padding="6dp"
+        android:gravity="center">
 
         <com.tnmower.tnmower.ui.GaugeView
             android:id="@+id/gaugeVolt"
@@ -32,9 +34,11 @@
 
         <TextView
             android:id="@+id/txtVolt"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
             android:text="แรงดัน = 0.00 V"
             android:textColor="#00FF00"
-            android:textSize="11sp"/>
+            android:textSize="12sp"/>
     </LinearLayout>
 
     <!-- TEMP -->
@@ -42,15 +46,19 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="2"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:paddingTop="6dp">
 
+        <!-- LEFT -->
         <LinearLayout
             android:id="@+id/layoutTempL"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:gravity="center"
-            android:orientation="vertical">
+            android:background="#1E1E1E"
+            android:padding="6dp"
+            android:orientation="vertical"
+            android:gravity="center">
 
             <com.tnmower.tnmower.ui.GaugeView
                 android:id="@+id/gaugeTempL"
@@ -60,18 +68,24 @@
 
             <TextView
                 android:id="@+id/txtTempL"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
                 android:text="ซ้าย = 0 °C"
                 android:textColor="#FFA500"
-                android:textSize="10sp"/>
+                android:textSize="11sp"/>
         </LinearLayout>
 
+        <!-- RIGHT -->
         <LinearLayout
             android:id="@+id/layoutTempR"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:gravity="center"
-            android:orientation="vertical">
+            android:background="#1E1E1E"
+            android:padding="6dp"
+            android:layout_marginStart="4dp"
+            android:orientation="vertical"
+            android:gravity="center">
 
             <com.tnmower.tnmower.ui.GaugeView
                 android:id="@+id/gaugeTempR"
@@ -81,18 +95,21 @@
 
             <TextView
                 android:id="@+id/txtTempR"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
                 android:text="ขวา = 0 °C"
                 android:textColor="#FFA500"
-                android:textSize="10sp"/>
+                android:textSize="11sp"/>
         </LinearLayout>
     </LinearLayout>
 
-    <!-- CURRENT + MOTOR (เพิ่มพื้นที่) -->
+    <!-- CURRENT + MOTOR -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="4"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:paddingTop="6dp">
 
         <!-- LEFT -->
         <LinearLayout
@@ -100,9 +117,9 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:padding="4dp">
+            android:background="#1E1E1E"
+            android:padding="6dp"
+            android:orientation="vertical">
 
             <com.tnmower.tnmower.ui.GaugeView
                 android:id="@+id/gaugeCurrentL"
@@ -111,29 +128,29 @@
                 android:layout_weight="1"/>
 
             <TextView
-                android:text="กระแสซ้าย"
-                android:textColor="#00FFFF"
-                android:textSize="10sp"/>
-
-            <!-- 🔴 MOTOR LEFT -->
-            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:orientation="vertical">
+                android:text="กระแสซ้าย"
+                android:textColor="#00FFFF"
+                android:textSize="11sp"
+                android:gravity="center"
+                android:paddingTop="4dp"/>
 
-                <TextView
-                    android:id="@+id/txtM1"
-                    android:text="M1 = 0.00 A"
-                    android:textColor="#FFFFFF"
-                    android:textSize="10sp"/>
+            <TextView
+                android:id="@+id/txtM1"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="M1 = 0.00 A"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"/>
 
-                <TextView
-                    android:id="@+id/txtM2"
-                    android:text="M2 = 0.00 A"
-                    android:textColor="#FFFFFF"
-                    android:textSize="10sp"/>
-            </LinearLayout>
-
+            <TextView
+                android:id="@+id/txtM2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="M2 = 0.00 A"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"/>
         </LinearLayout>
 
         <!-- RIGHT -->
@@ -142,9 +159,10 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:padding="4dp">
+            android:background="#1E1E1E"
+            android:padding="6dp"
+            android:layout_marginStart="4dp"
+            android:orientation="vertical">
 
             <com.tnmower.tnmower.ui.GaugeView
                 android:id="@+id/gaugeCurrentR"
@@ -153,56 +171,56 @@
                 android:layout_weight="1"/>
 
             <TextView
-                android:text="กระแสขวา"
-                android:textColor="#00FFFF"
-                android:textSize="10sp"/>
-
-            <!-- 🔴 MOTOR RIGHT -->
-            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:orientation="vertical">
+                android:text="กระแสขวา"
+                android:textColor="#00FFFF"
+                android:textSize="11sp"
+                android:gravity="center"
+                android:paddingTop="4dp"/>
 
-                <TextView
-                    android:id="@+id/txtM3"
-                    android:text="M3 = 0.00 A"
-                    android:textColor="#FFFFFF"
-                    android:textSize="10sp"/>
+            <TextView
+                android:id="@+id/txtM3"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="M3 = 0.00 A"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"/>
 
-                <TextView
-                    android:id="@+id/txtM4"
-                    android:text="M4 = 0.00 A"
-                    android:textColor="#FFFFFF"
-                    android:textSize="10sp"/>
-            </LinearLayout>
-
+            <TextView
+                android:id="@+id/txtM4"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="M4 = 0.00 A"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"/>
         </LinearLayout>
-
     </LinearLayout>
 
     <!-- CONNECT -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="44dp"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:layout_marginTop="6dp">
 
         <Button
             android:id="@+id/btnConnect"
-            android:layout_weight="1"
             android:layout_width="0dp"
             android:layout_height="match_parent"
+            android:layout_weight="1"
             android:text="เชื่อมต่อ"
-            android:textSize="11sp"
+            android:textSize="12sp"
             android:background="#4CAF50"
             android:textColor="#FFFFFF"/>
 
         <Button
             android:id="@+id/btnDisconnect"
-            android:layout_weight="1"
             android:layout_width="0dp"
             android:layout_height="match_parent"
+            android:layout_weight="1"
             android:text="ตัด"
-            android:textSize="11sp"
+            android:textSize="12sp"
             android:background="#FF9800"
             android:textColor="#FFFFFF"/>
     </LinearLayout>
@@ -213,7 +231,8 @@
         android:layout_width="match_parent"
         android:layout_height="44dp"
         android:text="หยุดฉุกเฉิน"
-        android:textSize="12sp"
+        android:textSize="13sp"
+        android:layout_marginTop="4dp"
         android:background="@android:color/holo_red_dark"
         android:textColor="#FFFFFF"/>
 
