@@ -6,14 +6,12 @@
     android:layout_height="match_parent"
     android:background="#121212">
 
-    <!-- ========================= -->
     <!-- STATUS -->
-    <!-- ========================= -->
     <TextView
         android:id="@+id/txtStatus"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="DISCONNECTED"
+        android:text="@string/status_disconnected"
         android:textColor="#00E676"
         android:textSize="20sp"
         android:textStyle="bold"
@@ -23,14 +21,12 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"/>
 
-    <!-- ========================= -->
-    <!-- 🔴 แรงดัน -->
-    <!-- ========================= -->
+    <!-- แรงดัน -->
     <TextView
         android:id="@+id/labelVolt"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="แรงดัน"
+        android:text="@string/label_voltage"
         android:textColor="#FFFFFF"
         android:textSize="18sp"
         android:textStyle="bold"
@@ -42,7 +38,7 @@
         android:id="@+id/txtVolt"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="0.0 V"
+        android:text="@string/default_voltage"
         android:textColor="#FFFFFF"
         android:textSize="32sp"
         android:textStyle="bold"
@@ -50,14 +46,12 @@
         app:layout_constraintStart_toStartOf="parent"
         android:layout_marginStart="16dp"/>
 
-    <!-- ========================= -->
-    <!-- 🔴 อุณหภูมิ -->
-    <!-- ========================= -->
+    <!-- อุณหภูมิ -->
     <TextView
         android:id="@+id/labelTemp"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="อุณหภูมิ (ซ้าย - ขวา)"
+        android:text="@string/label_temp"
         android:textColor="#FFFFFF"
         android:textSize="18sp"
         android:textStyle="bold"
@@ -69,7 +63,7 @@
         android:id="@+id/txtTempL"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="L: 0.0 °C"
+        android:text="@string/default_temp_l"
         android:textColor="#FFFFFF"
         android:textSize="22sp"
         app:layout_constraintTop_toBottomOf="@id/labelTemp"
@@ -82,7 +76,7 @@
         android:id="@+id/txtTempR"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="R: 0.0 °C"
+        android:text="@string/default_temp_r"
         android:textColor="#FFFFFF"
         android:textSize="22sp"
         app:layout_constraintTop_toBottomOf="@id/labelTemp"
@@ -90,14 +84,12 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintWidth_percent="0.5"/>
 
-    <!-- ========================= -->
-    <!-- 🔴 กระแส -->
-    <!-- ========================= -->
+    <!-- กระแส -->
     <TextView
         android:id="@+id/labelCurrent"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="กระแส (M1 - M4)"
+        android:text="@string/label_current"
         android:textColor="#FFFFFF"
         android:textSize="18sp"
         android:textStyle="bold"
@@ -105,12 +97,12 @@
         app:layout_constraintStart_toStartOf="parent"
         android:layout_margin="16dp"/>
 
-    <!-- ROW 1 -->
+    <!-- M1 -->
     <TextView
         android:id="@+id/txtM1"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="M1: 0.0 A"
+        android:text="@string/default_m1"
         android:textColor="#FFFFFF"
         android:textSize="20sp"
         app:layout_constraintTop_toBottomOf="@id/labelCurrent"
@@ -119,23 +111,24 @@
         app:layout_constraintWidth_percent="0.5"
         android:layout_marginStart="16dp"/>
 
+    <!-- M2 -->
     <TextView
         android:id="@+id/txtM2"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="M2: 0.0 A"
+        android:text="@string/default_m2"
         android:textColor="#FFFFFF"
         android:textSize="20sp"
         app:layout_constraintTop_toBottomOf="@id/labelCurrent"
         app:layout_constraintStart_toEndOf="@id/txtM1"
         app:layout_constraintEnd_toEndOf="parent"/>
 
-    <!-- ROW 2 -->
+    <!-- M3 -->
     <TextView
         android:id="@+id/txtM3"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="M3: 0.0 A"
+        android:text="@string/default_m3"
         android:textColor="#FFFFFF"
         android:textSize="20sp"
         app:layout_constraintTop_toBottomOf="@id/txtM1"
@@ -145,11 +138,12 @@
         android:layout_marginStart="16dp"
         android:layout_marginTop="10dp"/>
 
+    <!-- M4 -->
     <TextView
         android:id="@+id/txtM4"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="M4: 0.0 A"
+        android:text="@string/default_m4"
         android:textColor="#FFFFFF"
         android:textSize="20sp"
         app:layout_constraintTop_toBottomOf="@id/txtM2"
@@ -157,15 +151,12 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="10dp"/>
 
-    <!-- ========================= -->
     <!-- BUTTON -->
-    <!-- ========================= -->
-
     <Button
         android:id="@+id/btnConnect"
         android:layout_width="0dp"
         android:layout_height="50dp"
-        android:text="CONNECT"
+        android:text="@string/btn_connect"
         android:textColor="#FFFFFF"
         android:backgroundTint="#2E7D32"
         app:layout_constraintBottom_toTopOf="@id/btnStop"
@@ -177,7 +168,7 @@
         android:id="@+id/btnDisconnect"
         android:layout_width="0dp"
         android:layout_height="50dp"
-        android:text="DISCONNECT"
+        android:text="@string/btn_disconnect"
         android:textColor="#FFFFFF"
         android:backgroundTint="#C62828"
         app:layout_constraintBottom_toTopOf="@id/btnStop"
@@ -189,7 +180,7 @@
         android:id="@+id/btnStop"
         android:layout_width="0dp"
         android:layout_height="60dp"
-        android:text="EMERGENCY STOP"
+        android:text="@string/btn_stop"
         android:textColor="#FFFFFF"
         android:backgroundTint="#FF6F00"
         app:layout_constraintBottom_toBottomOf="parent"

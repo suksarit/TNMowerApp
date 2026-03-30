@@ -6,12 +6,16 @@ import android.graphics.Color;
 import android.os.*;
 import android.widget.*;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 
 import com.tnmower.tnmower.R;
 import com.tnmower.tnmower.bluetooth.BluetoothService;
 import com.tnmower.tnmower.model.TelemetryData;
+
+import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -21,13 +25,12 @@ public class MainActivity extends AppCompatActivity {
 
     private Button btnConnect, btnDisconnect, btnStop;
 
-    private static final int REQ_BT = 100;
     private String selectedMAC = "";
 
     private boolean connected = false;
     private boolean connecting = false;
 
-    private Handler reconnectHandler = new Handler();
+    private final Handler reconnectHandler = new Handler(Looper.getMainLooper());
     private Runnable reconnectRunnable;
 
     private static final int RECONNECT_DELAY = 3000;
@@ -40,14 +43,34 @@ public class MainActivity extends AppCompatActivity {
 
     private Vibrator vibrator;
 
-    // 🔴 NEW (ลด lag)
-    private TelemetryData lastData = null;
+    // =========================
+    // 🔴 SMOOTH DATA
+    // =========================
+    private TelemetryData smoothData = null;
     private long lastUiUpdate = 0;
     private static final long UI_INTERVAL = 100;
 
-    // 🔴 NEW (bind service)
+    // =========================
+    // 🔴 SERVICE
+    // =========================
     private BluetoothService btService = null;
     private boolean isBound = false;
+
+    // =========================
+    // 🔴 Activity Result (แทนของเก่า)
+    // =========================
+    private final ActivityResultLauncher<Intent> deviceLauncher =
+            registerForActivityResult(
+                    new ActivityResultContracts.StartActivityForResult(),
+                    result -> {
+                        if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                            String mac = result.getData().getStringExtra("MAC");
+                            if (mac != null) {
+                                selectedMAC = mac;
+                                startBluetooth(mac);
+                            }
+                        }
+                    });
 
     private final ServiceConnection serviceConnection = new ServiceConnection() {
 
@@ -65,9 +88,6 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
-    // =========================
-    // RECEIVER
-    // =========================
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -92,7 +112,6 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
-    // =========================
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -120,14 +139,14 @@ public class MainActivity extends AppCompatActivity {
 
         updateButtonState();
 
+        // 🔴 FIX: no unused view
         btnConnect.setOnClickListener(v -> {
             if (connecting || connected) return;
 
             reconnectAttempts = 0;
 
             if (selectedMAC.isEmpty()) {
-                startActivityForResult(
-                        new Intent(this, DeviceListActivity.class), REQ_BT);
+                deviceLauncher.launch(new Intent(this, DeviceListActivity.class));
             } else {
                 startBluetooth(selectedMAC);
             }
@@ -148,14 +167,13 @@ public class MainActivity extends AppCompatActivity {
 
         btnStop.setOnClickListener(v -> sendStopCommand());
 
-        // 🔴 TELEMETRY
         BluetoothService.setTelemetryListener((volt, m1, m2, m3, m4, tL, tR) -> {
 
-            TelemetryData data = new TelemetryData(
+            TelemetryData raw = new TelemetryData(
                     volt, m1, m2, m3, m4, tL, tR
             );
 
-            updateUI(data);
+            updateUI(raw);
         });
 
         if (!selectedMAC.isEmpty()) {
@@ -163,8 +181,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // =========================
-    // 🔴 BIND SERVICE
     @Override
     protected void onStart() {
         super.onStart();
@@ -183,62 +199,66 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // =========================
-    private void updateUI(TelemetryData data) {
+    private void updateUI(TelemetryData raw) {
 
         long now = System.currentTimeMillis();
 
         if (now - lastUiUpdate < UI_INTERVAL) return;
-        if (!data.isValid()) return;
+        if (!raw.isValid()) return;
 
-        if (lastData != null) {
-            if (Math.abs(lastData.volt - data.volt) < 0.1f &&
-                    Math.abs(lastData.getAverageCurrent() - data.getAverageCurrent()) < 0.1f &&
-                    Math.abs(lastData.getMaxTemp() - data.getMaxTemp()) < 1f) {
-                return;
-            }
+        if (smoothData == null) {
+            smoothData = raw;
         }
 
-        lastData = data;
+        float alpha = 0.2f;
+
+        smoothData.volt = smooth(raw.volt, smoothData.volt, alpha);
+        smoothData.tempL = smooth(raw.tempL, smoothData.tempL, alpha);
+        smoothData.tempR = smooth(raw.tempR, smoothData.tempR, alpha);
+
+        smoothData.m1 = smooth(raw.m1, smoothData.m1, alpha);
+        smoothData.m2 = smooth(raw.m2, smoothData.m2, alpha);
+        smoothData.m3 = smooth(raw.m3, smoothData.m3, alpha);
+        smoothData.m4 = smooth(raw.m4, smoothData.m4, alpha);
+
         lastUiUpdate = now;
 
         runOnUiThread(() -> {
 
-            txtVolt.setText(String.format("%.1f V", data.volt));
+            txtVolt.setText(String.format(Locale.US, "%.1f V", smoothData.volt));
 
-            txtTempL.setText(String.format("L: %.1f °C", data.tempL));
-            txtTempR.setText(String.format("R: %.1f °C", data.tempR));
+            txtTempL.setText(String.format(Locale.US, "L: %.1f °C", smoothData.tempL));
+            txtTempR.setText(String.format(Locale.US, "R: %.1f °C", smoothData.tempR));
 
-            txtM1.setText(String.format("M1: %.1f A", data.m1));
-            txtM2.setText(String.format("M2: %.1f A", data.m2));
-            txtM3.setText(String.format("M3: %.1f A", data.m3));
-            txtM4.setText(String.format("M4: %.1f A", data.m4));
+            txtM1.setText(String.format(Locale.US, "M1: %.1f A", smoothData.m1));
+            txtM2.setText(String.format(Locale.US, "M2: %.1f A", smoothData.m2));
+            txtM3.setText(String.format(Locale.US, "M3: %.1f A", smoothData.m3));
+            txtM4.setText(String.format(Locale.US, "M4: %.1f A", smoothData.m4));
 
-            setColorSmart(txtVolt, data.volt, 20, 24);
+            setColorSmart(txtVolt, smoothData.volt, 20, 24);
 
-            setColorSmart(txtTempL, data.tempL, 60, 80);
-            setColorSmart(txtTempR, data.tempR, 60, 80);
+            setColorSmart(txtTempL, smoothData.tempL, 60, 80);
+            setColorSmart(txtTempR, smoothData.tempR, 60, 80);
 
-            setColorSmart(txtM1, data.m1, 20, 30);
-            setColorSmart(txtM2, data.m2, 20, 30);
-            setColorSmart(txtM3, data.m3, 20, 30);
-            setColorSmart(txtM4, data.m4, 20, 30);
+            setColorSmart(txtM1, smoothData.m1, 20, 30);
+            setColorSmart(txtM2, smoothData.m2, 20, 30);
+            setColorSmart(txtM3, smoothData.m3, 20, 30);
+            setColorSmart(txtM4, smoothData.m4, 20, 30);
 
-            if (data.hasError()) {
+            if (raw.hasError()) {
                 vibrateAlert();
             }
         });
     }
 
-    private void setColorSmart(TextView tv, float value, float warn, float danger) {
+    private float smooth(float target, float current, float alpha) {
+        return current + alpha * (target - current);
+    }
 
-        if (value >= danger) {
-            tv.setTextColor(Color.RED);
-        } else if (value >= warn) {
-            tv.setTextColor(0xFFFFA500);
-        } else {
-            tv.setTextColor(Color.WHITE);
-        }
+    private void setColorSmart(TextView tv, float value, float warn, float danger) {
+        if (value >= danger) tv.setTextColor(Color.RED);
+        else if (value >= warn) tv.setTextColor(0xFFFFA500);
+        else tv.setTextColor(Color.WHITE);
     }
 
     private void vibrateAlert() {
@@ -267,7 +287,7 @@ public class MainActivity extends AppCompatActivity {
         intent.putExtra("MAC", mac);
         startService(intent);
 
-        new Handler().postDelayed(() -> {
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
             if (!connected) {
                 connecting = false;
 
@@ -302,9 +322,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // 🔴 STOP ถูกต้องระดับระบบ
     private void sendStopCommand() {
-
         if (btService != null && isBound) {
             btService.sendStop();
         }

@@ -1,69 +1,65 @@
 <resources>
 
     <!-- ========================= -->
-    <!-- ชื่อแอป -->
+    <!-- APP -->
     <!-- ========================= -->
     <string name="app_name">TN Mower</string>
 
     <!-- ========================= -->
-    <!-- ปุ่ม -->
+    <!-- BUTTON -->
     <!-- ========================= -->
     <string name="btn_connect">เชื่อมต่อ</string>
     <string name="btn_disconnect">ตัดการเชื่อมต่อ</string>
-    <string name="btn_disconnect_short">ตัด</string>
-    <string name="btn_emergency">หยุดฉุกเฉิน</string>
+    <string name="btn_stop">หยุดฉุกเฉิน</string>
 
     <!-- ========================= -->
-    <!-- สถานะ -->
+    <!-- STATUS -->
     <!-- ========================= -->
-    <string name="status_disconnected">สถานะ: ไม่ได้เชื่อมต่อ</string>
-    <string name="status_connected">สถานะ: เชื่อมต่อแล้ว</string>
-    <string name="status_connecting">สถานะ: กำลังเชื่อมต่อ...</string>
+    <string name="status_disconnected">ไม่ได้เชื่อมต่อ</string>
+    <string name="status_connected">เชื่อมต่อแล้ว</string>
+    <string name="status_connecting">กำลังเชื่อมต่อ…</string>
     <string name="status_failed">เชื่อมต่อไม่สำเร็จ</string>
     <string name="status_prefix">สถานะ: %1$s</string>
 
     <!-- ========================= -->
-    <!-- label -->
+    <!-- LABEL -->
     <!-- ========================= -->
     <string name="label_voltage">แรงดัน</string>
-    <string name="label_current">กระแส</string>
-    <string name="label_current_left">กระแสซ้าย</string>
-    <string name="label_current_right">กระแสขวา</string>
-    <string name="label_temp">อุณหภูมิ</string>
-    <string name="label_temp_left">ซ้าย</string>
-    <string name="label_temp_right">ขวา</string>
+    <string name="label_temp">อุณหภูมิ (ซ้าย-ขวา)</string>
+    <string name="label_current">กระแส (M1-M4)</string>
+    <string name="label_select_device">เลือกอุปกรณ์ Bluetooth</string>
 
     <!-- ========================= -->
-    <!-- default (🔴 แก้ error ทั้งหมด) -->
+    <!-- DEFAULT VALUE -->
     <!-- ========================= -->
     <string name="default_voltage">0.00 V</string>
-    <string name="default_temp">0 °C</string>
-    <string name="default_current">0.00 A</string>
+    <string name="default_temp_l">L: 0 °C</string>
+    <string name="default_temp_r">R: 0 °C</string>
 
-    <string name="default_temp_l">ซ้าย = 0 °C</string>
-    <string name="default_temp_r">ขวา = 0 °C</string>
-
-    <string name="default_m1">M1 = 0.00 A</string>
-    <string name="default_m2">M2 = 0.00 A</string>
-    <string name="default_m3">M3 = 0.00 A</string>
-    <string name="default_m4">M4 = 0.00 A</string>
+    <string name="default_m1">M1: 0.00 A</string>
+    <string name="default_m2">M2: 0.00 A</string>
+    <string name="default_m3">M3: 0.00 A</string>
+    <string name="default_m4">M4: 0.00 A</string>
 
     <!-- ========================= -->
-    <!-- display format -->
+    <!-- FORMAT -->
     <!-- ========================= -->
-    <string name="display_voltage">แรงดัน = %1$.2f V</string>
-    <string name="display_temp_l">ซ้าย = %1$.0f °C</string>
-    <string name="display_temp_r">ขวา = %1$.0f °C</string>
-    <string name="display_m1">M1 = %1$.2f A</string>
-    <string name="display_m2">M2 = %1$.2f A</string>
-    <string name="display_m3">M3 = %1$.2f A</string>
-    <string name="display_m4">M4 = %1$.2f A</string>
+    <string name="format_voltage">%.1f V</string>
+    <string name="format_temp_l">L: %.1f °C</string>
+    <string name="format_temp_r">R: %.1f °C</string>
+
+    <string name="format_m1">M1: %.1f A</string>
+    <string name="format_m2">M2: %.1f A</string>
+    <string name="format_m3">M3: %.1f A</string>
+    <string name="format_m4">M4: %.1f A</string>
 
     <!-- ========================= -->
-    <!-- หน่วย -->
+    <!-- DEVICE LIST -->
     <!-- ========================= -->
-    <string name="unit_volt">V</string>
-    <string name="unit_amp">A</string>
-    <string name="unit_temp">°C</string>
+    <string name="error_no_bluetooth">อุปกรณ์ไม่รองรับ Bluetooth</string>
+    <string name="error_need_permission">ต้องอนุญาต Bluetooth ก่อน</string>
+    <string name="no_device_found">ไม่พบอุปกรณ์ที่จับคู่ไว้</string>
+    <string name="unknown_device">ไม่ทราบชื่อ</string>
+    <string name="device_selected">เลือก: %1$s</string>
 
 </resources>

@@ -12,8 +12,11 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.*;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
+
+import com.tnmower.tnmower.R;
 
 import java.util.ArrayList;
 import java.util.Set;
@@ -21,8 +24,7 @@ import java.util.Set;
 public class DeviceListActivity extends AppCompatActivity {
 
     private BluetoothAdapter btAdapter;
-
-    private boolean itemSelected = false; // 🔴 กันกดซ้ำ
+    private boolean itemSelected = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -40,7 +42,7 @@ public class DeviceListActivity extends AppCompatActivity {
         // TITLE
         // ===============================
         TextView title = new TextView(this);
-        title.setText("เลือกอุปกรณ์ Bluetooth");
+        title.setText(getString(R.string.label_select_device));
         title.setTextColor(Color.WHITE);
         title.setTextSize(18f);
         title.setPadding(0, 0, 0, 20);
@@ -64,13 +66,13 @@ public class DeviceListActivity extends AppCompatActivity {
         // CHECK BT SUPPORT
         // ===============================
         if (btAdapter == null) {
-            Toast.makeText(this, "อุปกรณ์ไม่รองรับ Bluetooth", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, getString(R.string.error_no_bluetooth), Toast.LENGTH_LONG).show();
             finish();
             return;
         }
 
         // ===============================
-        // CHECK PERMISSION (Android 12+)
+        // CHECK PERMISSION
         // ===============================
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
@@ -82,7 +84,7 @@ public class DeviceListActivity extends AppCompatActivity {
                         1
                 );
 
-                Toast.makeText(this, "ต้องอนุญาต Bluetooth ก่อน", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, getString(R.string.error_need_permission), Toast.LENGTH_LONG).show();
                 return;
             }
         }
@@ -103,13 +105,13 @@ public class DeviceListActivity extends AppCompatActivity {
         ArrayList<String> displayList = new ArrayList<>();
 
         if (paired.isEmpty()) {
-            displayList.add("ไม่พบอุปกรณ์ที่จับคู่ไว้");
+            displayList.add(getString(R.string.no_device_found));
         } else {
             for (BluetoothDevice d : paired) {
 
                 String name = d.getName();
                 if (name == null || name.isEmpty()) {
-                    name = "ไม่ทราบชื่อ";
+                    name = getString(R.string.unknown_device);
                 }
 
                 deviceList.add(d);
@@ -118,20 +120,20 @@ public class DeviceListActivity extends AppCompatActivity {
         }
 
         // ===============================
-        // ADAPTER UI
+        // ADAPTER
         // ===============================
         ArrayAdapter<String> adapter =
-                new ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, displayList) {
+                new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, displayList) {
 
+                    @NonNull
                     @Override
-                    public View getView(int position, View convertView, ViewGroup parent) {
+                    public View getView(int position, View convertView, @NonNull ViewGroup parent) {
 
                         TextView tv = (TextView) super.getView(position, convertView, parent);
 
                         tv.setTextColor(Color.WHITE);
                         tv.setTextSize(14f);
                         tv.setPadding(24, 24, 24, 24);
-
                         tv.setBackgroundColor(Color.parseColor("#1E1E1E"));
 
                         return tv;
@@ -146,23 +148,22 @@ public class DeviceListActivity extends AppCompatActivity {
         listView.setOnItemClickListener((parent, view, position, id) -> {
 
             if (deviceList.isEmpty()) return;
+            if (itemSelected) return;
 
-            if (itemSelected) return; // 🔴 กันกดซ้ำ
             itemSelected = true;
 
             BluetoothDevice device = deviceList.get(position);
-
             String mac = device.getAddress();
 
-            Toast.makeText(this, "เลือก: " + mac, Toast.LENGTH_SHORT).show();
+            Toast.makeText(this,
+                    getString(R.string.device_selected, mac),
+                    Toast.LENGTH_SHORT).show();
 
             Intent result = new Intent();
             result.putExtra("MAC", mac);
 
             setResult(RESULT_OK, result);
-
             finish();
         });
     }
 }
-
