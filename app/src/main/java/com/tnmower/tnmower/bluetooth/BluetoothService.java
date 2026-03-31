@@ -12,7 +12,7 @@ import androidx.core.app.NotificationCompat;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.UUID;
-import java.util.LinkedList;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.tnmower.tnmower.utils.CRCUtil;
@@ -34,13 +34,15 @@ public class BluetoothService extends Service {
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final AtomicBoolean connected = new AtomicBoolean(false);
 
+    private final AtomicBoolean processingQueue = new AtomicBoolean(false);
+
     private String lastStatus = "";
 
     private long lastRxTime = 0;
     private static final long RX_TIMEOUT = 3000;
 
     // =========================
-    // 🔴 BINDER
+    // 🔴 BINDER (เพิ่มใหม่)
     // =========================
     public class LocalBinder extends Binder {
         public BluetoothService getService() {
@@ -56,12 +58,9 @@ public class BluetoothService extends Service {
     }
 
     // =========================
-    // 🔴 PROTOCOL
     private int lastSeq = -1;
     private int txSeq = 0;
 
-    // =========================
-    // 🔴 ACK + RESEND
     private int waitingAck = -1;
     private long lastCmdTime = 0;
     private int retryCount = 0;
@@ -70,13 +69,13 @@ public class BluetoothService extends Service {
     private static final long RESEND_INTERVAL = 300;
     private static final int MAX_RETRY = 3;
 
-    // =========================
-    // 🔴 QUEUE
-    private final LinkedList<Byte> commandQueue = new LinkedList<>();
+    private final ConcurrentLinkedQueue<Byte> commandQueue = new ConcurrentLinkedQueue<>();
 
-    // =========================
     public interface OnTelemetryListener {
-        void onTelemetry(float volt, float m1, float m2, float m3, float m4, float tempL, float tempR);
+        void onTelemetry(int flags, int error,
+                         float volt,
+                         float m1, float m2, float m3, float m4,
+                         float tempL, float tempR);
     }
 
     private static OnTelemetryListener telemetryListener;
@@ -116,14 +115,10 @@ public class BluetoothService extends Service {
         startForeground(1, notification);
     }
 
-    // ==================================================
-    // 🔴 STOP จริงระดับระบบ
-    // ==================================================
     public void sendStop() {
         sendPriorityCommand((byte) 0x10);
     }
 
-    // ==================================================
     private void connectionLoop() {
 
         while (running.get()) {
@@ -136,7 +131,6 @@ public class BluetoothService extends Service {
                 waitingAck = -1;
                 retryCount = 0;
                 commandQueue.clear();
-
                 safeClose();
             }
 
@@ -212,7 +206,6 @@ public class BluetoothService extends Service {
         }
     }
 
-    // ==================================================
     private void rxLoop() {
 
         byte[] buffer = new byte[32];
@@ -256,39 +249,32 @@ public class BluetoothService extends Service {
                 int type = buffer[idx++] & 0xFF;
                 int seq = buffer[idx++] & 0xFF;
 
-// 🔴 กัน packet ซ้ำ (เฉพาะ telemetry เท่านั้น)
-                if (type == 0x01 && seq == lastSeq) {
-                    continue;
-                }
+                if (type == 0x01 && seq == lastSeq) continue;
                 lastSeq = seq;
 
-// ==================================================
-// 🔴 1. TELEMETRY (ต้องมาก่อน)
-// ==================================================
                 if (type == 0x01) {
 
-                    idx += 2; // skip fault + state
+                    int flags = buffer[idx++] & 0xFF;
+                    int error = buffer[idx++] & 0xFF;
 
-                    float volt = ((short) ((buffer[idx++] << 8) | (buffer[idx++] & 0xFF))) / 100f;
+                    float volt = ((short)((buffer[idx++]<<8)|(buffer[idx++]&0xFF))) / 100f;
 
-                    float m1 = ((short) ((buffer[idx++] << 8) | (buffer[idx++] & 0xFF))) / 100f;
-                    float m2 = ((short) ((buffer[idx++] << 8) | (buffer[idx++] & 0xFF))) / 100f;
-                    float m3 = ((short) ((buffer[idx++] << 8) | (buffer[idx++] & 0xFF))) / 100f;
-                    float m4 = ((short) ((buffer[idx++] << 8) | (buffer[idx++] & 0xFF))) / 100f;
+                    float m1 = ((short)((buffer[idx++]<<8)|(buffer[idx++]&0xFF))) / 100f;
+                    float m2 = ((short)((buffer[idx++]<<8)|(buffer[idx++]&0xFF))) / 100f;
+                    float m3 = ((short)((buffer[idx++]<<8)|(buffer[idx++]&0xFF))) / 100f;
+                    float m4 = ((short)((buffer[idx++]<<8)|(buffer[idx++]&0xFF))) / 100f;
 
-                    float tempL = ((short) ((buffer[idx++] << 8) | (buffer[idx++] & 0xFF)));
-                    float tempR = ((short) ((buffer[idx++] << 8) | (buffer[idx++] & 0xFF)));
+                    float tempL = ((short)((buffer[idx++]<<8)|(buffer[idx++]&0xFF)));
+                    float tempR = ((short)((buffer[idx++]<<8)|(buffer[idx++]&0xFF)));
 
                     if (telemetryListener != null) {
-                        telemetryListener.onTelemetry(volt, m1, m2, m3, m4, tempL, tempR);
+                        telemetryListener.onTelemetry(flags, error,
+                                volt, m1, m2, m3, m4, tempL, tempR);
                     }
 
-                    continue; // 🔴 สำคัญมาก: จบ packet นี้เลย
+                    continue;
                 }
 
-// ==================================================
-// 🔴 2. ACK
-// ==================================================
                 if (type == 0x03) {
 
                     if (seq == waitingAck) {
@@ -299,6 +285,7 @@ public class BluetoothService extends Service {
 
                     continue;
                 }
+
             } catch (Exception e) {
 
                 connected.set(false);
@@ -309,7 +296,6 @@ public class BluetoothService extends Service {
         }
     }
 
-    // =========================
     public void queueCommand(byte cmd) {
         commandQueue.add(cmd);
         processQueue();
@@ -321,7 +307,7 @@ public class BluetoothService extends Service {
         waitingAck = -1;
         retryCount = 0;
 
-        commandQueue.addFirst(cmd);
+        commandQueue.add(cmd);
         processQueue();
     }
 
@@ -329,10 +315,21 @@ public class BluetoothService extends Service {
 
         if (!connected.get()) return;
         if (waitingAck != -1) return;
-        if (commandQueue.isEmpty()) return;
 
-        byte cmd = commandQueue.poll();
-        sendCommandInternal(cmd, false);
+        if (!processingQueue.compareAndSet(false, true)) return;
+
+        try {
+
+            Byte cmdObj = commandQueue.poll();
+            if (cmdObj == null) return;
+
+            byte cmd = cmdObj;
+
+            sendCommandInternal(cmd, false);
+
+        } finally {
+            processingQueue.set(false);
+        }
     }
 
     private void sendCommandInternal(byte cmd, boolean isRetry) {
@@ -357,8 +354,8 @@ public class BluetoothService extends Service {
 
             int crc = CRCUtil.crc16(packet, idx) & 0xFFFF;
 
-            packet[idx++] = (byte) (crc & 0xFF);         // LOW BYTE
-            packet[idx++] = (byte) ((crc >> 8) & 0xFF);  // HIGH BYTE
+            packet[idx++] = (byte) (crc & 0xFF);
+            packet[idx++] = (byte) ((crc >> 8) & 0xFF);
 
             output.write(packet, 0, idx);
             output.flush();
@@ -372,8 +369,7 @@ public class BluetoothService extends Service {
 
             lastCmdTime = System.currentTimeMillis();
 
-        } catch (Exception ignored) {
-        }
+        } catch (Exception ignored) {}
     }
 
     private void sendStatus(String status) {
@@ -388,18 +384,9 @@ public class BluetoothService extends Service {
     }
 
     private void safeClose() {
-        try {
-            if (input != null) input.close();
-        } catch (Exception ignored) {
-        }
-        try {
-            if (output != null) output.close();
-        } catch (Exception ignored) {
-        }
-        try {
-            if (socket != null) socket.close();
-        } catch (Exception ignored) {
-        }
+        try { if (input != null) input.close(); } catch (Exception ignored) {}
+        try { if (output != null) output.close(); } catch (Exception ignored) {}
+        try { if (socket != null) socket.close(); } catch (Exception ignored) {}
     }
 
     @Override
