@@ -21,12 +21,26 @@
     <string name="status_failed">เชื่อมต่อไม่สำเร็จ</string>
     <string name="status_prefix">สถานะ: %1$s</string>
 
+    <!-- 🔴 SYSTEM STATUS -->
+    <string name="status_lock">LOCK</string>
+    <string name="status_failsafe">FAILSAFE</string>
+    <string name="status_running">RUNNING</string>
+    <string name="status_idle">IDLE</string>
+
+    <!-- 🔴 ERROR -->
+    <string name="status_error_code">ERROR: %1$d</string>
+
+    <!-- 🔴 ALERT -->
+    <string name="status_low_volt">LOW VOLT</string>
+    <string name="status_high_current">HIGH CURRENT</string>
+    <string name="status_over_temp">OVER TEMP</string>
+
     <!-- ========================= -->
     <!-- LABEL -->
     <!-- ========================= -->
     <string name="label_voltage">แรงดัน</string>
-    <string name="label_temp">อุณหภูมิ </string>
-    <string name="label_current">กระแส </string>
+    <string name="label_temp">อุณหภูมิ</string>
+    <string name="label_current">กระแส</string>
     <string name="label_select_device">เลือกอุปกรณ์ Bluetooth</string>
 
     <!-- ========================= -->

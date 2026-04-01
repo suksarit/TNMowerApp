@@ -25,7 +25,11 @@ public class MainActivity extends AppCompatActivity {
 
     private final Handler reconnectHandler = new Handler(Looper.getMainLooper());
 
+    // UI
     private TextView txtVolt, txtStatus;
+    private TextView txtTempL, txtTempR;
+    private TextView txtM1, txtM2, txtM3, txtM4;
+
     private Button btnConnect, btnDisconnect, btnStop;
 
     private String selectedMAC = "";
@@ -100,7 +104,6 @@ public class MainActivity extends AppCompatActivity {
 
                         selectedMAC = mac;
 
-                        // 🔴 save MAC
                         SharedPreferences sp = getSharedPreferences("TN_MOWER", MODE_PRIVATE);
                         sp.edit().putString("MAC", mac).apply();
 
@@ -109,7 +112,6 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
 
-    // =========================
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -120,8 +122,17 @@ public class MainActivity extends AppCompatActivity {
         SharedPreferences sp = getSharedPreferences("TN_MOWER", MODE_PRIVATE);
         selectedMAC = sp.getString("MAC", "");
 
+        // bind UI
         txtVolt = findViewById(R.id.txtVolt);
         txtStatus = findViewById(R.id.txtStatus);
+
+        txtTempL = findViewById(R.id.txtTempL);
+        txtTempR = findViewById(R.id.txtTempR);
+
+        txtM1 = findViewById(R.id.txtM1);
+        txtM2 = findViewById(R.id.txtM2);
+        txtM3 = findViewById(R.id.txtM3);
+        txtM4 = findViewById(R.id.txtM4);
 
         btnConnect = findViewById(R.id.btnConnect);
         btnDisconnect = findViewById(R.id.btnDisconnect);
@@ -129,7 +140,6 @@ public class MainActivity extends AppCompatActivity {
 
         updateButtonState();
 
-        // 🔴 AUTO CONNECT
         if (!selectedMAC.isEmpty()) {
             startBluetooth(selectedMAC);
         }
@@ -138,7 +148,7 @@ public class MainActivity extends AppCompatActivity {
             if (connecting || connected) return;
 
             if (!hasPermission()) {
-                Toast.makeText(this, "กรุณาอนุญาต Bluetooth ก่อน", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, getString(R.string.error_need_permission), Toast.LENGTH_SHORT).show();
                 requestBluetoothPermission();
                 return;
             }
@@ -162,20 +172,18 @@ public class MainActivity extends AppCompatActivity {
 
             updateButtonState();
 
-            txtStatus.setText("DISCONNECTED");
+            txtStatus.setText(getString(R.string.status_disconnected));
             txtStatus.setTextColor(Color.RED);
         });
 
         btnStop.setOnClickListener(v -> sendStopCommand());
 
         BluetoothService.setTelemetryListener((flags, error, volt, m1, m2, m3, m4, tL, tR) -> {
-
             TelemetryData raw = new TelemetryData(flags, error, volt, m1, m2, m3, m4, tL, tR);
             updateUI(raw);
         });
     }
 
-    // =========================
     private boolean hasPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             return checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
@@ -193,12 +201,10 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // =========================
     private void startBluetooth(String mac) {
 
         if (connecting) return;
 
-        // 🔴 fallback ถ้า MAC หาย
         if (mac == null || mac.isEmpty()) {
             deviceLauncher.launch(new Intent(this, DeviceListActivity.class));
             return;
@@ -207,7 +213,7 @@ public class MainActivity extends AppCompatActivity {
         connecting = true;
         connected = false;
 
-        txtStatus.setText("CONNECTING...");
+        txtStatus.setText(getString(R.string.status_connecting));
         txtStatus.setTextColor(Color.YELLOW);
 
         updateButtonState();
@@ -224,7 +230,7 @@ public class MainActivity extends AppCompatActivity {
 
                 connecting = false;
 
-                txtStatus.setText("CONNECT FAIL");
+                txtStatus.setText(getString(R.string.status_failed));
                 txtStatus.setTextColor(Color.RED);
 
                 scheduleReconnect();
@@ -286,11 +292,62 @@ public class MainActivity extends AppCompatActivity {
 
         smoothData.volt = smooth(raw.volt, smoothData.volt, 0.1f);
 
+        smoothData.m1 = smooth(raw.m1, smoothData.m1, 0.2f);
+        smoothData.m2 = smooth(raw.m2, smoothData.m2, 0.2f);
+        smoothData.m3 = smooth(raw.m3, smoothData.m3, 0.2f);
+        smoothData.m4 = smooth(raw.m4, smoothData.m4, 0.2f);
+
+        smoothData.tempL = smooth(raw.tempL, smoothData.tempL, 0.1f);
+        smoothData.tempR = smooth(raw.tempR, smoothData.tempR, 0.1f);
+
         lastUiUpdate = now;
 
-        runOnUiThread(() ->
-                txtVolt.setText(String.format(Locale.US, "%.1f V", smoothData.volt))
-        );
+        runOnUiThread(() -> {
+
+            txtVolt.setText(getString(R.string.format_voltage, smoothData.volt));
+
+            txtTempL.setText(getString(R.string.format_temp_l, smoothData.tempL));
+            txtTempR.setText(getString(R.string.format_temp_r, smoothData.tempR));
+
+            txtM1.setText(getString(R.string.format_m1, smoothData.m1));
+            txtM2.setText(getString(R.string.format_m2, smoothData.m2));
+            txtM3.setText(getString(R.string.format_m3, smoothData.m3));
+            txtM4.setText(getString(R.string.format_m4, smoothData.m4));
+
+            if (raw.isLocked()) {
+                txtStatus.setText(getString(R.string.status_lock));
+                txtStatus.setTextColor(Color.RED);
+            } else if (raw.isFailsafe()) {
+                txtStatus.setText(getString(R.string.status_failsafe));
+                txtStatus.setTextColor(Color.YELLOW);
+            } else if (raw.isEngineRunning()) {
+                txtStatus.setText(getString(R.string.status_running));
+                txtStatus.setTextColor(Color.GREEN);
+            } else {
+                txtStatus.setText(getString(R.string.status_idle));
+                txtStatus.setTextColor(Color.GRAY);
+            }
+
+            if (raw.hasErrorCode()) {
+                txtStatus.setText(getString(R.string.status_error_code, raw.error));
+                txtStatus.setTextColor(Color.RED);
+            }
+
+            if (raw.isVoltageLow()) {
+                txtStatus.setText(getString(R.string.status_low_volt));
+                txtStatus.setTextColor(Color.RED);
+            }
+
+            if (raw.isCurrentHigh()) {
+                txtStatus.setText(getString(R.string.status_high_current));
+                txtStatus.setTextColor(Color.RED);
+            }
+
+            if (raw.isTempHigh()) {
+                txtStatus.setText(getString(R.string.status_over_temp));
+                txtStatus.setTextColor(Color.RED);
+            }
+        });
     }
 
     private float smooth(float target, float current, float alpha) {
