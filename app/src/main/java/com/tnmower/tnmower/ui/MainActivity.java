@@ -19,7 +19,6 @@ import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final int RECONNECT_DELAY = 3000;
     private static final int CONNECT_TIMEOUT = 5000;
     private static final int MAX_RECONNECT = 5;
     private static final long UI_INTERVAL = 100;
@@ -27,9 +26,6 @@ public class MainActivity extends AppCompatActivity {
     private final Handler reconnectHandler = new Handler(Looper.getMainLooper());
 
     private TextView txtVolt, txtStatus;
-    private TextView txtTempL, txtTempR;
-    private TextView txtM1, txtM2, txtM3, txtM4;
-
     private Button btnConnect, btnDisconnect, btnStop;
 
     private String selectedMAC = "";
@@ -101,14 +97,18 @@ public class MainActivity extends AppCompatActivity {
                 if (result.getResultCode() == RESULT_OK && result.getData() != null) {
                     String mac = result.getData().getStringExtra("MAC");
                     if (mac != null) {
+
                         selectedMAC = mac;
+
+                        // 🔴 save MAC
+                        SharedPreferences sp = getSharedPreferences("TN_MOWER", MODE_PRIVATE);
+                        sp.edit().putString("MAC", mac).apply();
+
                         startBluetooth(mac);
                     }
                 }
             });
 
-    // =========================
-    // ON CREATE
     // =========================
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -123,25 +123,18 @@ public class MainActivity extends AppCompatActivity {
         txtVolt = findViewById(R.id.txtVolt);
         txtStatus = findViewById(R.id.txtStatus);
 
-        txtTempL = findViewById(R.id.txtTempL);
-        txtTempR = findViewById(R.id.txtTempR);
-
-        txtM1 = findViewById(R.id.txtM1);
-        txtM2 = findViewById(R.id.txtM2);
-        txtM3 = findViewById(R.id.txtM3);
-        txtM4 = findViewById(R.id.txtM4);
-
         btnConnect = findViewById(R.id.btnConnect);
         btnDisconnect = findViewById(R.id.btnDisconnect);
         btnStop = findViewById(R.id.btnStop);
 
         updateButtonState();
 
-        // =========================
-        // CONNECT
-        // =========================
-        btnConnect.setOnClickListener(v -> {
+        // 🔴 AUTO CONNECT
+        if (!selectedMAC.isEmpty()) {
+            startBluetooth(selectedMAC);
+        }
 
+        btnConnect.setOnClickListener(v -> {
             if (connecting || connected) return;
 
             if (!hasPermission()) {
@@ -151,17 +144,9 @@ public class MainActivity extends AppCompatActivity {
             }
 
             reconnectAttempts = 0;
-
-            if (selectedMAC.isEmpty()) {
-                deviceLauncher.launch(new Intent(this, DeviceListActivity.class));
-            } else {
-                startBluetooth(selectedMAC);
-            }
+            deviceLauncher.launch(new Intent(this, DeviceListActivity.class));
         });
 
-        // =========================
-        // DISCONNECT
-        // =========================
         btnDisconnect.setOnClickListener(v -> {
 
             stopReconnect();
@@ -177,23 +162,15 @@ public class MainActivity extends AppCompatActivity {
 
             updateButtonState();
 
-            txtStatus.setText(R.string.status_disconnected);
+            txtStatus.setText("DISCONNECTED");
             txtStatus.setTextColor(Color.RED);
         });
 
         btnStop.setOnClickListener(v -> sendStopCommand());
 
-        // =========================
-        // TELEMETRY
-        // =========================
         BluetoothService.setTelemetryListener((flags, error, volt, m1, m2, m3, m4, tL, tR) -> {
 
-            TelemetryData raw = new TelemetryData(
-                    flags, error,
-                    volt, m1, m2, m3, m4,
-                    tL, tR
-            );
-
+            TelemetryData raw = new TelemetryData(flags, error, volt, m1, m2, m3, m4, tL, tR);
             updateUI(raw);
         });
     }
@@ -221,10 +198,16 @@ public class MainActivity extends AppCompatActivity {
 
         if (connecting) return;
 
+        // 🔴 fallback ถ้า MAC หาย
+        if (mac == null || mac.isEmpty()) {
+            deviceLauncher.launch(new Intent(this, DeviceListActivity.class));
+            return;
+        }
+
         connecting = true;
         connected = false;
 
-        txtStatus.setText(R.string.status_connecting);
+        txtStatus.setText("CONNECTING...");
         txtStatus.setTextColor(Color.YELLOW);
 
         updateButtonState();
@@ -236,22 +219,40 @@ public class MainActivity extends AppCompatActivity {
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
 
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
+
             if (!connected) {
+
                 connecting = false;
 
-                txtStatus.setText(R.string.status_failed);
+                txtStatus.setText("CONNECT FAIL");
                 txtStatus.setTextColor(Color.RED);
 
                 scheduleReconnect();
                 updateButtonState();
             }
+
         }, CONNECT_TIMEOUT);
     }
 
     private void scheduleReconnect() {
-        if (reconnectAttempts >= MAX_RECONNECT) return;
+
+        if (selectedMAC == null || selectedMAC.isEmpty()) {
+            deviceLauncher.launch(new Intent(this, DeviceListActivity.class));
+            return;
+        }
+
+        if (reconnectAttempts >= MAX_RECONNECT) {
+            txtStatus.setText("RECONNECT LIMIT");
+            txtStatus.setTextColor(Color.RED);
+            return;
+        }
 
         reconnectAttempts++;
+
+        int delay;
+        if (reconnectAttempts < 3) delay = 2000;
+        else if (reconnectAttempts < 5) delay = 4000;
+        else delay = 8000;
 
         reconnectRunnable = () -> {
             if (!connected && !connecting) {
@@ -259,7 +260,7 @@ public class MainActivity extends AppCompatActivity {
             }
         };
 
-        reconnectHandler.postDelayed(reconnectRunnable, RECONNECT_DELAY);
+        reconnectHandler.postDelayed(reconnectRunnable, delay);
     }
 
     private void stopReconnect() {
@@ -305,7 +306,6 @@ public class MainActivity extends AppCompatActivity {
         txtStatus.setText(status);
     }
 
-    // =========================
     @Override
     protected void onResume() {
         super.onResume();

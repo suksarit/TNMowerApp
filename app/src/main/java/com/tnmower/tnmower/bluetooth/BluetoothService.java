@@ -1,13 +1,24 @@
 package com.tnmower.tnmower.bluetooth;
 
-import android.app.*;
-import android.bluetooth.*;
+import android.Manifest;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.Service;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothClass;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothSocket;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.Manifest;
-import android.os.*;
+import android.os.Binder;
+import android.os.Build;
+import android.os.IBinder;
+import android.os.SystemClock;
 
 import androidx.core.app.NotificationCompat;
+
+import com.tnmower.tnmower.utils.CRCUtil;
 
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -15,75 +26,43 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import com.tnmower.tnmower.utils.CRCUtil;
-
 public class BluetoothService extends Service {
 
     private static final String CHANNEL_ID = "TN_MOWER_BT";
-
+    private static final long RX_TIMEOUT = 3000;
+    private static final long RESEND_INTERVAL = 300;
+    private static final int MAX_RETRY = 3;
+    private static OnTelemetryListener telemetryListener;
+    private final UUID UUID_SPP =
+            UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+    private final AtomicBoolean running = new AtomicBoolean(true);
+    private final AtomicBoolean connected = new AtomicBoolean(false);
+    private final AtomicBoolean processingQueue = new AtomicBoolean(false);
+    private final IBinder binder = new LocalBinder();
+    private final ConcurrentLinkedQueue<Byte> commandQueue = new ConcurrentLinkedQueue<>();
     private BluetoothAdapter btAdapter;
     private BluetoothSocket socket;
     private InputStream input;
     private OutputStream output;
-
     private String MAC = "00:21:13:00:00:00";
-
-    private final UUID UUID_SPP =
-            UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
-
-    private final AtomicBoolean running = new AtomicBoolean(true);
-    private final AtomicBoolean connected = new AtomicBoolean(false);
-    private final AtomicBoolean processingQueue = new AtomicBoolean(false);
-
     private String lastStatus = "";
-
     private long lastRxTime = 0;
-    private static final long RX_TIMEOUT = 3000;
-
-    // =========================
-    // 🔴 BINDER
-    // =========================
-    public class LocalBinder extends Binder {
-        public BluetoothService getService() {
-            return BluetoothService.this;
-        }
-    }
-
-    private final IBinder binder = new LocalBinder();
-
-    @Override
-    public IBinder onBind(Intent intent) {
-        return binder;
-    }
-
     // =========================
     private int lastSeq = -1;
     private int txSeq = 0;
-
     private int waitingAck = -1;
+    private int reconnectFailCount = 0;  // 🔴 นับจำนวน reconnect fail
     private long lastCmdTime = 0;
     private int retryCount = 0;
     private byte lastCmdSent = 0;
 
-    private static final long RESEND_INTERVAL = 300;
-    private static final int MAX_RETRY = 3;
-
-    private final ConcurrentLinkedQueue<Byte> commandQueue = new ConcurrentLinkedQueue<>();
-
-    // =========================
-    // 🔴 TELEMETRY
-    // =========================
-    public interface OnTelemetryListener {
-        void onTelemetry(int flags, int error,
-                         float volt,
-                         float m1, float m2, float m3, float m4,
-                         float tempL, float tempR);
-    }
-
-    private static OnTelemetryListener telemetryListener;
-
     public static void setTelemetryListener(OnTelemetryListener listener) {
         telemetryListener = listener;
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return binder;
     }
 
     // =========================
@@ -144,45 +123,113 @@ public class BluetoothService extends Service {
     // =========================
     private void connectionLoop() {
 
+        long lastReconnectAttempt = 0;
+
         while (running.get()) {
 
-            long now = System.currentTimeMillis();
+            try {
 
-            if (connected.get() && (now - lastRxTime > RX_TIMEOUT)) {
-                sendStatus("TIMEOUT");
+                long now = System.currentTimeMillis();
+
+                // =========================
+                // 🔴 WATCHDOG (RX หาย)
+                // =========================
+                if (connected.get() && (now - lastRxTime > RX_TIMEOUT)) {
+
+                    sendStatus("WATCHDOG_TIMEOUT");
+
+                    connected.set(false);
+                    waitingAck = -1;
+                    retryCount = 0;
+                    commandQueue.clear();
+
+                    safeClose();
+                }
+
+                // =========================
+                // 🔴 RESEND COMMAND
+                // =========================
+                if (connected.get() && waitingAck != -1) {
+
+                    if (now - lastCmdTime > RESEND_INTERVAL) {
+
+                        if (retryCount < MAX_RETRY) {
+
+                            retryCount++;
+
+                            try {
+                                sendCommandInternal(lastCmdSent, true);
+                            } catch (Throwable t) {
+                                sendStatus("CMD_ERROR");
+                                connected.set(false);
+                                safeClose();
+                            }
+
+                        } else {
+
+                            sendStatus("CMD_FAILED");
+
+                            waitingAck = -1;
+                            retryCount = 0;
+
+                            processQueue();
+                        }
+                    }
+                }
+
+                // =========================
+                // 🔴 AUTO RECONNECT (ไม่ spam)
+                // =========================
+                if (!connected.get()) {
+
+                    long delay;
+
+                    // 🔴 exponential backoff
+                    if (reconnectFailCount < 3) {
+                        delay = 3000;   // 3 วิ
+                    } else if (reconnectFailCount < 6) {
+                        delay = 5000;   // 5 วิ
+                    } else {
+                        delay = 10000;  // 10 วิ
+                    }
+
+                    if (now - lastReconnectAttempt > delay) {
+
+                        lastReconnectAttempt = now;
+
+                        try {
+
+                            sendStatus("RECONNECTING");
+                            connect();
+
+// 🔴 เช็คว่าต่อสำเร็จจริงไหม
+                            if (connected.get()) {
+                                reconnectFailCount = 0;
+                            } else {
+                                reconnectFailCount++;
+                            }
+
+                        } catch (Throwable t) {
+
+                            reconnectFailCount++;
+
+                            sendStatus("RECONNECT_FAIL");
+
+                            connected.set(false);
+                            safeClose();
+                        }
+                    }
+                }
+
+            } catch (Throwable t) {
+
+                // 🔴 กัน loop ตาย
+                sendStatus("FATAL_LOOP");
                 connected.set(false);
-                waitingAck = -1;
-                retryCount = 0;
-                commandQueue.clear();
                 safeClose();
             }
 
-            if (connected.get() && waitingAck != -1) {
-
-                if (now - lastCmdTime > RESEND_INTERVAL) {
-
-                    if (retryCount < MAX_RETRY) {
-
-                        retryCount++;
-                        sendCommandInternal(lastCmdSent, true);
-
-                    } else {
-
-                        sendStatus("CMD_FAILED");
-
-                        waitingAck = -1;
-                        retryCount = 0;
-
-                        processQueue();
-                    }
-                }
-            }
-
-            if (!connected.get()) {
-                connect();
-            }
-
-            SystemClock.sleep(50);
+            SystemClock.sleep(100);
         }
     }
 
@@ -195,7 +242,9 @@ public class BluetoothService extends Service {
 
         try {
 
-            // 🔴 Android 12+ permission check
+            // =========================
+            // 🔴 Permission check
+            // =========================
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 if (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
                         != PackageManager.PERMISSION_GRANTED) {
@@ -207,36 +256,136 @@ public class BluetoothService extends Service {
 
             sendStatus("CONNECTING");
 
-            btAdapter.cancelDiscovery();
-
-            BluetoothDevice device = btAdapter.getRemoteDevice(MAC);
-
-            // 🔴 กรองอุปกรณ์ที่ไม่ใช่ Serial (กันพวกหูฟัง/เมาส์)
-            BluetoothClass btClass = device.getBluetoothClass();
-
-            if (btClass != null) {
-                int dc = btClass.getDeviceClass();
-
-                if (dc == BluetoothClass.Device.AUDIO_VIDEO_HEADPHONES ||
-                        dc == BluetoothClass.Device.AUDIO_VIDEO_LOUDSPEAKER ||
-                        dc == BluetoothClass.Device.PERIPHERAL_KEYBOARD ||
-                        dc == BluetoothClass.Device.PERIPHERAL_POINTING) {
-
-                    sendStatus("INVALID_DEVICE");   // 🔴 แจ้งว่าเลือกผิด
-                    SystemClock.sleep(2000);        // หน่วงก่อน loop ใหม่
-                    return;
-                }
+            if (btAdapter == null) {
+                sendStatus("NO_BT");
+                return;
             }
 
-            // 🔴 สร้าง socket (SPP เท่านั้น)
-            socket = device.createRfcommSocketToServiceRecord(UUID_SPP);
+            btAdapter.cancelDiscovery();
 
-            // 🔴 จุดเสี่ยง (แต่ตอนนี้มี try-catch ครอบแล้ว)
-            socket.connect();
+            // =========================
+            // 🔴 GET DEVICE
+            // =========================
+            BluetoothDevice device;
+            try {
+                device = btAdapter.getRemoteDevice(MAC);
+            } catch (Throwable t) {
+                sendStatus("INVALID_MAC");
+                return;
+            }
 
-            input = socket.getInputStream();
-            output = socket.getOutputStream();
+            // =========================
+            // 🔴 FILTER DEVICE TYPE
+            // =========================
+            try {
+                BluetoothClass btClass = device.getBluetoothClass();
 
+                if (btClass != null) {
+                    int dc = btClass.getDeviceClass();
+
+                    if (dc == BluetoothClass.Device.AUDIO_VIDEO_HEADPHONES ||
+                            dc == BluetoothClass.Device.AUDIO_VIDEO_LOUDSPEAKER ||
+                            dc == BluetoothClass.Device.PERIPHERAL_KEYBOARD ||
+                            dc == BluetoothClass.Device.PERIPHERAL_POINTING) {
+
+                        sendStatus("INVALID_DEVICE");
+                        return;
+                    }
+                }
+            } catch (Throwable ignored) {}
+
+            // =========================
+            // 🔴 CREATE SOCKET
+            // =========================
+            try {
+                socket = device.createRfcommSocketToServiceRecord(UUID_SPP);
+            } catch (Throwable t) {
+                sendStatus("SOCKET_FAIL");
+                return;
+            }
+
+            // =========================
+            // 🔴 CONNECT
+            // =========================
+            try {
+                socket.connect();
+            } catch (Throwable t) {
+                sendStatus("CONNECT_FAIL");
+                safeClose();
+                return;
+            }
+
+            // =========================
+            // 🔴 STREAM
+            // =========================
+            try {
+                input = socket.getInputStream();
+                output = socket.getOutputStream();
+            } catch (Throwable t) {
+                sendStatus("STREAM_FAIL");
+                safeClose();
+                return;
+            }
+
+            // =========================
+            // 🔴 HANDSHAKE (นิ่ง + กัน edge case)
+            // =========================
+            try {
+
+                boolean ok = false;
+
+                for (int attempt = 0; attempt < 2; attempt++) {
+
+                    // ส่ง handshake
+                    output.write(new byte[]{0x55, (byte) 0xAA});
+                    output.flush();
+
+                    long start = System.currentTimeMillis();
+
+                    int r1 = -1;
+                    int r2 = -1;
+
+                    while (System.currentTimeMillis() - start < 1000) {
+
+                        try {
+
+                            if (r1 == -1 && input.available() > 0) {
+                                r1 = input.read();
+                            }
+
+                            if (r1 != -1 && input.available() > 0) {
+                                r2 = input.read();
+                                break;
+                            }
+
+                        } catch (Exception ignored) {}
+
+                        SystemClock.sleep(5);
+                    }
+
+                    if (r1 == -1 || r2 == -1) continue;
+
+                    if ((r1 & 0xFF) == 0xAA && (r2 & 0xFF) == 0x55) {
+                        ok = true;
+                        break;
+                    }
+                }
+
+                if (!ok) {
+                    sendStatus("HANDSHAKE_FAIL");
+                    safeClose();
+                    return;
+                }
+
+            } catch (Throwable t) {
+                sendStatus("HANDSHAKE_FAIL");
+                safeClose();
+                return;
+            }
+
+            // =========================
+            // 🔴 SUCCESS (ของเดิมทั้งหมด)
+            // =========================
             connected.set(true);
             lastRxTime = System.currentTimeMillis();
             lastSeq = -1;
@@ -248,31 +397,11 @@ public class BluetoothService extends Service {
 
             new Thread(this::rxLoop).start();
 
-        } catch (Exception e) {
+        } catch (Throwable t) {
 
             connected.set(false);
-
-            // 🔴 วิเคราะห์ error เพื่อแยกประเภท
-            String msg = e.getMessage();
-
-            if (msg != null &&
-                    (msg.contains("read failed") ||
-                            msg.contains("socket closed") ||
-                            msg.contains("Service discovery failed"))) {
-
-                // ❌ ไม่ใช่ HC-05 / อุปกรณ์ไม่รองรับ
-                sendStatus("INVALID_DEVICE");
-
-            } else {
-
-                // ❌ ต่อไม่ติดทั่วไป
-                sendStatus("CONNECT_FAIL");
-            }
-
+            sendStatus("FATAL_ERROR");
             safeClose();
-
-            // 🔴 หน่วงก่อน reconnect (กัน loop รัว)
-            SystemClock.sleep(2000);
         }
     }
 
@@ -285,20 +414,44 @@ public class BluetoothService extends Service {
 
             try {
 
-                int b = input.read();
-                if (b == -1) continue;
+                // =========================
+                // 🔴 READ HEADER
+                // =========================
+                int b;
+                try {
+                    b = input.read();
+                } catch (Throwable t) {
+                    throw new RuntimeException("READ_FAIL");
+                }
 
+                if (b == -1) continue;
                 if ((b & 0xFF) != 0xAA) continue;
 
-                int len = input.read();
+                int len;
+                try {
+                    len = input.read();
+                } catch (Throwable t) {
+                    throw new RuntimeException("LEN_FAIL");
+                }
+
                 if (len <= 0 || len > 24) continue;
 
+                // =========================
+                // 🔴 READ PAYLOAD
+                // =========================
                 int read = 0;
                 while (read < len) {
                     int r = input.read(buffer, read, len - read);
-                    if (r > 0) read += r;
+                    if (r > 0) {
+                        read += r;
+                    } else {
+                        throw new RuntimeException("PAYLOAD_FAIL");
+                    }
                 }
 
+                // =========================
+                // 🔴 CRC
+                // =========================
                 int crcLow = input.read();
                 int crcHigh = input.read();
                 int crcRx = (crcHigh << 8) | crcLow;
@@ -317,26 +470,36 @@ public class BluetoothService extends Service {
 
                 int idx = 0;
 
+                // =========================
+                // 🔴 SAFE READ (กัน index พัง)
+                // =========================
+                if (len < 2) continue;
+
                 int type = buffer[idx++] & 0xFF;
                 int seq = buffer[idx++] & 0xFF;
 
                 if (type == 0x01 && seq == lastSeq) continue;
                 lastSeq = seq;
 
+                // =========================
+                // 🔴 TELEMETRY
+                // =========================
                 if (type == 0x01) {
+
+                    if (len < 18) continue; // 🔴 กัน data พัง
 
                     int flags = buffer[idx++] & 0xFF;
                     int error = buffer[idx++] & 0xFF;
 
-                    float volt = ((short)((buffer[idx++]<<8)|(buffer[idx++]&0xFF))) / 100f;
+                    float volt = ((short) ((buffer[idx++] << 8) | (buffer[idx++] & 0xFF))) / 100f;
 
-                    float m1 = ((short)((buffer[idx++]<<8)|(buffer[idx++]&0xFF))) / 100f;
-                    float m2 = ((short)((buffer[idx++]<<8)|(buffer[idx++]&0xFF))) / 100f;
-                    float m3 = ((short)((buffer[idx++]<<8)|(buffer[idx++]&0xFF))) / 100f;
-                    float m4 = ((short)((buffer[idx++]<<8)|(buffer[idx++]&0xFF))) / 100f;
+                    float m1 = ((short) ((buffer[idx++] << 8) | (buffer[idx++] & 0xFF))) / 100f;
+                    float m2 = ((short) ((buffer[idx++] << 8) | (buffer[idx++] & 0xFF))) / 100f;
+                    float m3 = ((short) ((buffer[idx++] << 8) | (buffer[idx++] & 0xFF))) / 100f;
+                    float m4 = ((short) ((buffer[idx++] << 8) | (buffer[idx++] & 0xFF))) / 100f;
 
-                    float tempL = ((short)((buffer[idx++]<<8)|(buffer[idx++]&0xFF)));
-                    float tempR = ((short)((buffer[idx++]<<8)|(buffer[idx++]&0xFF)));
+                    float tempL = ((short) ((buffer[idx++] << 8) | (buffer[idx++] & 0xFF)));
+                    float tempR = ((short) ((buffer[idx++] << 8) | (buffer[idx++] & 0xFF)));
 
                     if (telemetryListener != null) {
                         telemetryListener.onTelemetry(flags, error,
@@ -346,6 +509,9 @@ public class BluetoothService extends Service {
                     continue;
                 }
 
+                // =========================
+                // 🔴 ACK
+                // =========================
                 if (type == 0x03) {
 
                     if (seq == waitingAck) {
@@ -357,10 +523,11 @@ public class BluetoothService extends Service {
                     continue;
                 }
 
-            } catch (Exception e) {
+            } catch (Throwable t) {
 
+                // 🔴 กัน thread ตาย (สำคัญมาก)
                 connected.set(false);
-                sendStatus("RECONNECTING");
+                sendStatus("RX_ERROR");
                 safeClose();
                 break;
             }
@@ -442,7 +609,8 @@ public class BluetoothService extends Service {
 
             lastCmdTime = System.currentTimeMillis();
 
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
     }
 
     private void sendStatus(String status) {
@@ -457,9 +625,18 @@ public class BluetoothService extends Service {
     }
 
     private void safeClose() {
-        try { if (input != null) input.close(); } catch (Exception ignored) {}
-        try { if (output != null) output.close(); } catch (Exception ignored) {}
-        try { if (socket != null) socket.close(); } catch (Exception ignored) {}
+        try {
+            if (input != null) input.close();
+        } catch (Exception ignored) {
+        }
+        try {
+            if (output != null) output.close();
+        } catch (Exception ignored) {
+        }
+        try {
+            if (socket != null) socket.close();
+        } catch (Exception ignored) {
+        }
     }
 
     @Override
@@ -469,5 +646,24 @@ public class BluetoothService extends Service {
         safeClose();
         sendStatus("DISCONNECTED");
         super.onDestroy();
+    }
+
+    // =========================
+    // 🔴 TELEMETRY
+    // =========================
+    public interface OnTelemetryListener {
+        void onTelemetry(int flags, int error,
+                         float volt,
+                         float m1, float m2, float m3, float m4,
+                         float tempL, float tempR);
+    }
+
+    // =========================
+    // 🔴 BINDER
+    // =========================
+    public class LocalBinder extends Binder {
+        public BluetoothService getService() {
+            return BluetoothService.this;
+        }
     }
 }
