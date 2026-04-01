@@ -186,13 +186,20 @@ public class BluetoothService extends Service {
         }
     }
 
+    // =========================
+// 🔴 FUNCTION: connect()
+// FILE: BluetoothService.java
+// หน้าที่: เชื่อมต่อแบบกัน crash + แยกสถานะชัดเจน
+// =========================
     private void connect() {
 
         try {
 
+            // 🔴 Android 12+ permission check
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 if (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
                         != PackageManager.PERMISSION_GRANTED) {
+
                     sendStatus("NO_PERMISSION");
                     return;
                 }
@@ -204,7 +211,27 @@ public class BluetoothService extends Service {
 
             BluetoothDevice device = btAdapter.getRemoteDevice(MAC);
 
+            // 🔴 กรองอุปกรณ์ที่ไม่ใช่ Serial (กันพวกหูฟัง/เมาส์)
+            BluetoothClass btClass = device.getBluetoothClass();
+
+            if (btClass != null) {
+                int dc = btClass.getDeviceClass();
+
+                if (dc == BluetoothClass.Device.AUDIO_VIDEO_HEADPHONES ||
+                        dc == BluetoothClass.Device.AUDIO_VIDEO_LOUDSPEAKER ||
+                        dc == BluetoothClass.Device.PERIPHERAL_KEYBOARD ||
+                        dc == BluetoothClass.Device.PERIPHERAL_POINTING) {
+
+                    sendStatus("INVALID_DEVICE");   // 🔴 แจ้งว่าเลือกผิด
+                    SystemClock.sleep(2000);        // หน่วงก่อน loop ใหม่
+                    return;
+                }
+            }
+
+            // 🔴 สร้าง socket (SPP เท่านั้น)
             socket = device.createRfcommSocketToServiceRecord(UUID_SPP);
+
+            // 🔴 จุดเสี่ยง (แต่ตอนนี้มี try-catch ครอบแล้ว)
             socket.connect();
 
             input = socket.getInputStream();
@@ -224,8 +251,28 @@ public class BluetoothService extends Service {
         } catch (Exception e) {
 
             connected.set(false);
-            sendStatus("RECONNECTING");
+
+            // 🔴 วิเคราะห์ error เพื่อแยกประเภท
+            String msg = e.getMessage();
+
+            if (msg != null &&
+                    (msg.contains("read failed") ||
+                            msg.contains("socket closed") ||
+                            msg.contains("Service discovery failed"))) {
+
+                // ❌ ไม่ใช่ HC-05 / อุปกรณ์ไม่รองรับ
+                sendStatus("INVALID_DEVICE");
+
+            } else {
+
+                // ❌ ต่อไม่ติดทั่วไป
+                sendStatus("CONNECT_FAIL");
+            }
+
             safeClose();
+
+            // 🔴 หน่วงก่อน reconnect (กัน loop รัว)
+            SystemClock.sleep(2000);
         }
     }
 

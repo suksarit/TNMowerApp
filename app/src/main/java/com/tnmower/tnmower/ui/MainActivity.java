@@ -1,11 +1,10 @@
 package com.tnmower.tnmower.ui;
 
 import android.content.*;
-import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.*;
-import android.widget.Button;
-import android.widget.TextView;
+import android.widget.*;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -47,8 +46,10 @@ public class MainActivity extends AppCompatActivity {
     private BluetoothService btService = null;
     private boolean isBound = false;
 
+    // =========================
+    // SERVICE
+    // =========================
     private final ServiceConnection serviceConnection = new ServiceConnection() {
-
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
             BluetoothService.LocalBinder binder = (BluetoothService.LocalBinder) service;
@@ -63,6 +64,9 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    // =========================
+    // STATUS RECEIVER
+    // =========================
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -89,6 +93,9 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean isReceiverRegistered = false;
 
+    // =========================
+    // DEVICE SELECT
+    // =========================
     private final ActivityResultLauncher<Intent> deviceLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
                 if (result.getResultCode() == RESULT_OK && result.getData() != null) {
@@ -100,10 +107,15 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
 
+    // =========================
+    // ON CREATE
+    // =========================
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        requestBluetoothPermission();
 
         SharedPreferences sp = getSharedPreferences("TN_MOWER", MODE_PRIVATE);
         selectedMAC = sp.getString("MAC", "");
@@ -125,8 +137,18 @@ public class MainActivity extends AppCompatActivity {
 
         updateButtonState();
 
+        // =========================
+        // CONNECT
+        // =========================
         btnConnect.setOnClickListener(v -> {
+
             if (connecting || connected) return;
+
+            if (!hasPermission()) {
+                Toast.makeText(this, "กรุณาอนุญาต Bluetooth ก่อน", Toast.LENGTH_SHORT).show();
+                requestBluetoothPermission();
+                return;
+            }
 
             reconnectAttempts = 0;
 
@@ -137,6 +159,9 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        // =========================
+        // DISCONNECT
+        // =========================
         btnDisconnect.setOnClickListener(v -> {
 
             stopReconnect();
@@ -158,6 +183,9 @@ public class MainActivity extends AppCompatActivity {
 
         btnStop.setOnClickListener(v -> sendStopCommand());
 
+        // =========================
+        // TELEMETRY
+        // =========================
         BluetoothService.setTelemetryListener((flags, error, volt, m1, m2, m3, m4, tL, tR) -> {
 
             TelemetryData raw = new TelemetryData(
@@ -170,16 +198,25 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    @Override
-    protected void onStop() {
-        super.onStop();
+    // =========================
+    private boolean hasPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
+                    == PackageManager.PERMISSION_GRANTED;
+        }
+        return true;
+    }
 
-        if (isBound) {
-            unbindService(serviceConnection);
-            isBound = false;
+    private void requestBluetoothPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            requestPermissions(new String[]{
+                    android.Manifest.permission.BLUETOOTH_CONNECT,
+                    android.Manifest.permission.BLUETOOTH_SCAN
+            }, 1001);
         }
     }
 
+    // =========================
     private void startBluetooth(String mac) {
 
         if (connecting) return;
@@ -195,12 +232,7 @@ public class MainActivity extends AppCompatActivity {
         Intent intent = new Intent(this, BluetoothService.class);
         intent.putExtra("MAC", mac);
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent);
-        } else {
-            startService(intent);
-        }
-
+        startService(intent);
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
 
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
@@ -217,7 +249,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void scheduleReconnect() {
-
         if (reconnectAttempts >= MAX_RECONNECT) return;
 
         reconnectAttempts++;
@@ -247,46 +278,18 @@ public class MainActivity extends AppCompatActivity {
     private void updateUI(TelemetryData raw) {
 
         long now = System.currentTimeMillis();
-
         if (now - lastUiUpdate < UI_INTERVAL) return;
         if (!raw.isValid()) return;
 
-        if (smoothData == null) {
-            smoothData = raw;
-        }
+        if (smoothData == null) smoothData = raw;
 
-        float alphaVolt = 0.1f;
-        float alphaTemp = 0.15f;
-        float alphaCurrent = 0.3f;
-
-        smoothData.volt = smooth(raw.volt, smoothData.volt, alphaVolt);
-
-        smoothData.tempL = smooth(raw.tempL, smoothData.tempL, alphaTemp);
-        smoothData.tempR = smooth(raw.tempR, smoothData.tempR, alphaTemp);
-
-        smoothData.m1 = smooth(raw.m1, smoothData.m1, alphaCurrent);
-        smoothData.m2 = smooth(raw.m2, smoothData.m2, alphaCurrent);
-        smoothData.m3 = smooth(raw.m3, smoothData.m3, alphaCurrent);
-        smoothData.m4 = smooth(raw.m4, smoothData.m4, alphaCurrent);
-
-        // 🔴 FIX สำคัญ (ห้ามลืม)
-        smoothData.flags = raw.flags;
-        smoothData.error = raw.error;
+        smoothData.volt = smooth(raw.volt, smoothData.volt, 0.1f);
 
         lastUiUpdate = now;
 
-        runOnUiThread(() -> {
-
-            txtVolt.setText(String.format(Locale.US, "%.1f V", smoothData.volt));
-
-            txtTempL.setText(String.format(Locale.US, "L: %.1f °C", smoothData.tempL));
-            txtTempR.setText(String.format(Locale.US, "R: %.1f °C", smoothData.tempR));
-
-            txtM1.setText(String.format(Locale.US, "M1: %.1f A", smoothData.m1));
-            txtM2.setText(String.format(Locale.US, "M2: %.1f A", smoothData.m2));
-            txtM3.setText(String.format(Locale.US, "M3: %.1f A", smoothData.m3));
-            txtM4.setText(String.format(Locale.US, "M4: %.1f A", smoothData.m4));
-        });
+        runOnUiThread(() ->
+                txtVolt.setText(String.format(Locale.US, "%.1f V", smoothData.volt))
+        );
     }
 
     private float smooth(float target, float current, float alpha) {
@@ -299,17 +302,21 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateStatusText(String status) {
-        txtStatus.setText(getString(R.string.status_prefix, status));
-        txtStatus.setTextColor(status.contains("CONNECTED") ? Color.GREEN : Color.RED);
+        txtStatus.setText(status);
     }
 
+    // =========================
     @Override
     protected void onResume() {
         super.onResume();
 
         if (!isReceiverRegistered) {
-            IntentFilter filter = new IntentFilter("TNMOWER_STATUS");
-            ContextCompat.registerReceiver(this, statusReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
+            ContextCompat.registerReceiver(
+                    this,
+                    statusReceiver,
+                    new IntentFilter("TNMOWER_STATUS"),
+                    ContextCompat.RECEIVER_NOT_EXPORTED
+            );
             isReceiverRegistered = true;
         }
     }
