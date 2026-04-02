@@ -13,9 +13,9 @@
         android:layout_height="wrap_content"
         android:text="@string/default_voltage"
         android:textSize="28sp"
-        android:textStyle="bold"
-        android:gravity="center"
-        app:layout_constraintTop_toTopOf="parent"
+
+
+
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"/>
 

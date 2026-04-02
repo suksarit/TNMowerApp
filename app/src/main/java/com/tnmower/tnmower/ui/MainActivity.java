@@ -21,11 +21,11 @@ import android.widget.Toast;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 
 import com.tnmower.tnmower.R;
 import com.tnmower.tnmower.bluetooth.BluetoothService;
 import com.tnmower.tnmower.model.TelemetryData;
-import androidx.core.content.ContextCompat;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -137,12 +137,6 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
 
-    // STATUS RECEIVER
-    // =========================
-    // =========================
-
-    private boolean isReceiverRegistered = false;
-
     // =========================
     // onCreate
     // =========================
@@ -200,12 +194,16 @@ public class MainActivity extends AppCompatActivity {
             if (connecting || connected) return;
 
             if (!hasPermission()) {
-                Toast.makeText(this, getString(R.string.error_need_permission), Toast.LENGTH_SHORT).show();
+
                 requestBluetoothPermission();
-                return;
+
+                Toast.makeText(this, "รออนุญาต Bluetooth ก่อน", Toast.LENGTH_SHORT).show();
+
+                return;   // 🔴 ห้ามเปิด DeviceList ทันที
             }
 
-              deviceLauncher.launch(new Intent(this, DeviceListActivity.class));
+// 🔴 เปิดเฉพาะตอนมี permission แล้ว
+            deviceLauncher.launch(new Intent(this, DeviceListActivity.class));
         });
 
         btnDisconnect.setOnClickListener(v -> {
@@ -243,11 +241,13 @@ public class MainActivity extends AppCompatActivity {
                 unbindService(serviceConnection);
                 isBound = false;
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
 
         try {
             stopService(new Intent(this, BluetoothService.class));
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
     }
 
     @Override
@@ -304,11 +304,13 @@ public class MainActivity extends AppCompatActivity {
                 unbindService(serviceConnection);
                 isBound = false;
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
 
         try {
             stopService(new Intent(this, BluetoothService.class));
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
 
         // 🔴 VALIDATE
         if (mac == null || mac.length() < 17) {
@@ -353,6 +355,9 @@ public class MainActivity extends AppCompatActivity {
         // 🔴 TIMEOUT
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
 
+            if (isFinishing() || isDestroyed()) return;
+            if (!connecting) return;
+
             if (!connected) {
 
                 connecting = false;
@@ -361,6 +366,9 @@ public class MainActivity extends AppCompatActivity {
                 txtStatus.setTextColor(Color.RED);
 
                 updateButtonState();
+
+                // 🔴 เพิ่มตรงนี้: กลับไปเลือกใหม่
+                deviceLauncher.launch(new Intent(this, DeviceListActivity.class));
             }
 
         }, CONNECT_TIMEOUT);
@@ -428,11 +436,9 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
 
-        if (!isReceiverRegistered) {
-
+        try {
             IntentFilter filter = new IntentFilter("TNMOWER_STATUS");
 
-            // 🔴 ใช้ ContextCompat แทน (แก้ Lint 100%)
             ContextCompat.registerReceiver(
                     this,
                     statusReceiver,
@@ -440,7 +446,7 @@ public class MainActivity extends AppCompatActivity {
                     ContextCompat.RECEIVER_NOT_EXPORTED
             );
 
-            isReceiverRegistered = true;
+        } catch (Exception ignored) {
         }
     }
 
@@ -448,10 +454,34 @@ public class MainActivity extends AppCompatActivity {
     protected void onPause() {
         super.onPause();
 
-        if (isReceiverRegistered) {
+        try {
             unregisterReceiver(statusReceiver);
-            isReceiverRegistered = false;
+        } catch (Exception ignored) {
         }
     }
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if (requestCode == 1001) {
+
+            boolean granted = true;
+
+            for (int r : grantResults) {
+                if (r != PackageManager.PERMISSION_GRANTED) {
+                    granted = false;
+                    break;
+                }
+            }
+
+            if (granted) {
+                // ❌ ห้ามเปิด DeviceList อัตโนมัติ
+                Toast.makeText(this, "พร้อมใช้งาน Bluetooth แล้ว", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "ไม่ได้รับอนุญาต Bluetooth", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
 }
+

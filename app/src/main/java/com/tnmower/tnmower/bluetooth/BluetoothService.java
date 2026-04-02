@@ -110,7 +110,7 @@ public class BluetoothService extends Service {
             }
         }
 
-        return START_STICKY;
+        return START_NOT_STICKY;
     }
 
     // =========================
@@ -207,7 +207,7 @@ public class BluetoothService extends Service {
                 // =========================
                 // 🔴 AUTO RECONNECT (SAFE)
                 // =========================
-                if (!connected.get()) {
+                if (!connected.get() && !connecting.get()) {
 
                     long delay;
 
