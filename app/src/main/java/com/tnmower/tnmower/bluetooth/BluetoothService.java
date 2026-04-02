@@ -6,7 +6,6 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
 import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothClass;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
 import android.content.Intent;
@@ -20,6 +19,7 @@ import androidx.core.app.NotificationCompat;
 
 import com.tnmower.tnmower.utils.CRCUtil;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.UUID;
@@ -37,6 +37,7 @@ public class BluetoothService extends Service {
             UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final AtomicBoolean connected = new AtomicBoolean(false);
+    private final AtomicBoolean connecting = new AtomicBoolean(false);
     private final AtomicBoolean processingQueue = new AtomicBoolean(false);
     private final IBinder binder = new LocalBinder();
     private final ConcurrentLinkedQueue<Byte> commandQueue = new ConcurrentLinkedQueue<>();
@@ -51,7 +52,7 @@ public class BluetoothService extends Service {
     private int lastSeq = -1;
     private int txSeq = 0;
     private int waitingAck = -1;
-    private final int reconnectFailCount = 0;  // 🔴 นับจำนวน reconnect fail
+    private int reconnectFailCount = 0; // 🔴 นับจำนวน reconnect fail
     private long lastCmdTime = 0;
     private int retryCount = 0;
     private byte lastCmdSent = 0;
@@ -145,6 +146,8 @@ public class BluetoothService extends Service {
     // =========================
     private void connectionLoop() {
 
+        long lastReconnectAttempt = 0;
+
         while (running.get()) {
 
             try {
@@ -183,7 +186,11 @@ public class BluetoothService extends Service {
 
                                 sendStatus("CMD_ERROR");
 
+                                // 🔴 HARD RESET
                                 connected.set(false);
+                                waitingAck = -1;
+                                retryCount = 0;
+
                                 safeClose();
                             }
 
@@ -200,24 +207,63 @@ public class BluetoothService extends Service {
                 }
 
                 // =========================
-                // 🔴 ❌ ปิด AUTO RECONNECT ทั้งหมด
+                // 🔴 AUTO RECONNECT (SAFE)
                 // =========================
                 if (!connected.get()) {
 
-                    // 🔴 ไม่ connect เองแล้ว
-                    // รอ Activity สั่ง startBluetooth() เท่านั้น
+                    long delay;
 
-                    SystemClock.sleep(200);
-                    continue;
+                    if (reconnectFailCount < 3) delay = 3000;
+                    else if (reconnectFailCount < 6) delay = 5000;
+                    else delay = 10000;
+
+                    if (now - lastReconnectAttempt > delay) {
+
+                        lastReconnectAttempt = now;
+
+                        try {
+
+                            // 🔴 HARD RESET ก่อน connect ใหม่
+                            safeClose();
+                            waitingAck = -1;
+                            retryCount = 0;
+                            commandQueue.clear();
+
+                            sendStatus("RECONNECTING");
+
+                            connect();
+
+                            if (connected.get()) {
+                                reconnectFailCount = 0;
+                            } else {
+                                reconnectFailCount++;
+                            }
+
+                        } catch (Throwable t) {
+
+                            reconnectFailCount++;
+
+                            sendStatus("RECONNECT_FAIL");
+
+                            connected.set(false);
+
+                            safeClose();
+                        }
+                    }
                 }
 
             } catch (Throwable t) {
 
-                // 🔴 กัน loop ตาย
+                // 🔴 LOOP ไม่ให้ตายเด็ดขาด
                 sendStatus("FATAL_LOOP");
 
                 connected.set(false);
-                safeClose();
+
+                try {
+                    safeClose();
+                } catch (Exception ignored) {}
+
+                SystemClock.sleep(500); // 🔴 หน่วงกัน crash loop
             }
 
             SystemClock.sleep(100);
@@ -232,13 +278,20 @@ public class BluetoothService extends Service {
     private synchronized void connect() {
 
         // =========================
-        // 🔴 กัน connect ซ้อน (สำคัญที่สุด)
+        // 🔴 กัน connect ซ้อนจริง (ระดับ production)
         // =========================
-        if (connected.get()) {
+        if (connected.get() || connecting.get()) {
             return;
         }
 
-        // 🔴 ปิดของเก่าทันที (กัน socket ซ้อน)
+        connecting.set(true);
+
+        // 🔴 reset state ทุกครั้ง
+        connected.set(false);
+        waitingAck = -1;
+        retryCount = 0;
+
+        // 🔴 ปิดของเก่าทั้งหมด
         safeClose();
 
         try {
@@ -251,6 +304,7 @@ public class BluetoothService extends Service {
                         != PackageManager.PERMISSION_GRANTED) {
 
                     sendStatus("NO_PERMISSION");
+                    connecting.set(false);
                     return;
                 }
             }
@@ -259,6 +313,7 @@ public class BluetoothService extends Service {
 
             if (btAdapter == null) {
                 sendStatus("NO_BT");
+                connecting.set(false);
                 return;
             }
 
@@ -272,6 +327,7 @@ public class BluetoothService extends Service {
                 device = btAdapter.getRemoteDevice(MAC);
             } catch (Throwable t) {
                 sendStatus("INVALID_MAC");
+                connecting.set(false);
                 return;
             }
 
@@ -282,16 +338,29 @@ public class BluetoothService extends Service {
                 socket = device.createRfcommSocketToServiceRecord(UUID_SPP);
             } catch (Throwable t) {
                 sendStatus("SOCKET_FAIL");
+                connecting.set(false);
                 return;
             }
 
             // =========================
-            // 🔴 CONNECT (กัน crash)
+            // 🔴 CONNECT (กันค้าง + crash)
             // =========================
             try {
+
+                // 🔴 กัน connect ค้าง
                 socket.connect();
-            } catch (Throwable t) {
+
+            } catch (IOException e) {
+
                 sendStatus("CONNECT_FAIL");
+                connecting.set(false);
+                safeClose();
+                return;
+
+            } catch (Throwable t) {
+
+                sendStatus("CONNECT_FATAL");
+                connecting.set(false);
                 safeClose();
                 return;
             }
@@ -304,12 +373,13 @@ public class BluetoothService extends Service {
                 output = socket.getOutputStream();
             } catch (Throwable t) {
                 sendStatus("STREAM_FAIL");
+                connecting.set(false);
                 safeClose();
                 return;
             }
 
             // =========================
-            // 🔴 HANDSHAKE
+            // 🔴 HANDSHAKE (กัน edge case)
             // =========================
             try {
 
@@ -328,6 +398,7 @@ public class BluetoothService extends Service {
                     while (System.currentTimeMillis() - start < 1000) {
 
                         try {
+
                             if (r1 == -1 && input.available() > 0) {
                                 r1 = input.read();
                             }
@@ -336,6 +407,7 @@ public class BluetoothService extends Service {
                                 r2 = input.read();
                                 break;
                             }
+
                         } catch (Exception ignored) {}
 
                         SystemClock.sleep(5);
@@ -351,12 +423,14 @@ public class BluetoothService extends Service {
 
                 if (!ok) {
                     sendStatus("HANDSHAKE_FAIL");
+                    connecting.set(false);
                     safeClose();
                     return;
                 }
 
             } catch (Throwable t) {
                 sendStatus("HANDSHAKE_FAIL");
+                connecting.set(false);
                 safeClose();
                 return;
             }
@@ -365,6 +439,8 @@ public class BluetoothService extends Service {
             // 🔴 SUCCESS
             // =========================
             connected.set(true);
+            connecting.set(false);
+
             lastRxTime = System.currentTimeMillis();
             lastSeq = -1;
 
@@ -373,17 +449,26 @@ public class BluetoothService extends Service {
 
             sendStatus("CONNECTED");
 
-            // 🔴 กัน thread ซ้อน
+            // =========================
+            // 🔴 RX THREAD (กันซ้อน)
+            // =========================
             new Thread(() -> {
                 try {
                     rxLoop();
-                } catch (Throwable ignored) {}
-            }).start();
+                } catch (Throwable t) {
+                    sendStatus("RX_CRASH");
+                    connected.set(false);
+                    safeClose();
+                }
+            }, "BT-RX").start();
 
         } catch (Throwable t) {
 
             connected.set(false);
+            connecting.set(false);
+
             sendStatus("FATAL_ERROR");
+
             safeClose();
         }
     }
@@ -489,15 +574,6 @@ public class BluetoothService extends Service {
 // =========================
                     if (telemetryListener != null) {
                         try {
-
-                            // 🔴 validate ก่อนยิง
-                            if (Float.isNaN(volt) ||
-                                    Float.isNaN(m1) || Float.isNaN(m2) ||
-                                    Float.isNaN(m3) || Float.isNaN(m4) ||
-                                    Float.isNaN(tempL) || Float.isNaN(tempR)) {
-
-                                continue;
-                            }
 
                             telemetryListener.onTelemetry(
                                     flags,

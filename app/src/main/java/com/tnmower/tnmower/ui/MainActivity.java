@@ -30,7 +30,6 @@ import androidx.core.content.ContextCompat;
 public class MainActivity extends AppCompatActivity {
 
     private static final int CONNECT_TIMEOUT = 5000;
-    private static final int MAX_RECONNECT = 5;
     private static final long UI_INTERVAL = 100;
 
     private final Handler reconnectHandler = new Handler(Looper.getMainLooper());
@@ -56,50 +55,41 @@ public class MainActivity extends AppCompatActivity {
         public void onReceive(Context context, Intent intent) {
 
             String status = intent.getStringExtra("status");
-
             if (status == null) return;
 
-            // =========================
-            // 🔴 CONNECTED
-            // =========================
-            if ("CONNECTED".equals(status)) {
+            // 🔴 บังคับให้ทำงานบน UI Thread เท่านั้น
+            MainActivity.this.runOnUiThread(() -> {
 
-                connected = true;
-                connecting = false;
+                if ("CONNECTED".equals(status)) {
 
-                stopReconnect();   // 🔴 กัน handler ค้าง
+                    connected = true;
+                    connecting = false;
 
-                txtStatus.setText("CONNECTED");
-                txtStatus.setTextColor(Color.GREEN);
-            }
+                    stopReconnect();
 
-            // =========================
-            // 🔴 DISCONNECTED
-            // =========================
-            else if ("DISCONNECTED".equals(status)) {
+                    txtStatus.setText("CONNECTED");
+                    txtStatus.setTextColor(Color.GREEN);
 
-                connected = false;
-                connecting = false;
+                } else if ("DISCONNECTED".equals(status)) {
 
-                stopReconnect();   // 🔴 หยุด handler
+                    connected = false;
+                    connecting = false;
 
-                // 🔴 ไม่ไป stopService ซ้ำแล้ว (กันชน)
-                txtStatus.setText("DISCONNECTED");
-                txtStatus.setTextColor(Color.RED);
-            }
+                    stopReconnect();
 
-            // =========================
-            // 🔴 STATUS อื่น
-            // =========================
-            else {
+                    txtStatus.setText("DISCONNECTED");
+                    txtStatus.setTextColor(Color.RED);
 
-                txtStatus.setText(status);
-            }
+                } else {
 
-            updateButtonState();
+                    txtStatus.setText(status);
+                }
+
+                updateButtonState();
+            });
         }
     };
-    private int reconnectAttempts = 0;
+
     private TelemetryData smoothData = null;
     private long lastUiUpdate = 0;
     private BluetoothService btService = null;
@@ -207,8 +197,7 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            reconnectAttempts = 0;
-            deviceLauncher.launch(new Intent(this, DeviceListActivity.class));
+              deviceLauncher.launch(new Intent(this, DeviceListActivity.class));
         });
 
         btnDisconnect.setOnClickListener(v -> {
@@ -284,25 +273,19 @@ public class MainActivity extends AppCompatActivity {
 
     private void startBluetooth(String mac) {
 
-        // =========================
-        // 🔴 HARD RESET ก่อนเริ่มใหม่ (สำคัญที่สุด)
-        // =========================
+        // 🔴 HARD RESET
         try {
             if (isBound) {
                 unbindService(serviceConnection);
                 isBound = false;
             }
-        } catch (Exception ignored) {
-        }
+        } catch (Exception ignored) {}
 
         try {
             stopService(new Intent(this, BluetoothService.class));
-        } catch (Exception ignored) {
-        }
+        } catch (Exception ignored) {}
 
-        // =========================
-        // 🔴 VALIDATE MAC
-        // =========================
+        // 🔴 VALIDATE
         if (mac == null || mac.length() < 17) {
             txtStatus.setText("INVALID MAC");
             txtStatus.setTextColor(Color.RED);
@@ -319,18 +302,33 @@ public class MainActivity extends AppCompatActivity {
 
         updateButtonState();
 
-        // =========================
-        // 🔴 START SERVICE ใหม่
-        // =========================
         Intent intent = new Intent(this, BluetoothService.class);
         intent.putExtra("MAC", mac);
 
-        startService(intent);
-        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
+        try {
+            // 🔴 เริ่ม service อย่างปลอดภัย
+            startService(intent);
 
-        // =========================
+            // 🔴 bind แบบกัน crash
+            boolean ok = bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
+
+            if (!ok) {
+                throw new Exception("Bind failed");
+            }
+
+        } catch (Exception e) {
+
+            connecting = false;
+            connected = false;
+
+            txtStatus.setText("START FAIL");
+            txtStatus.setTextColor(Color.RED);
+
+            updateButtonState();
+            return;
+        }
+
         // 🔴 TIMEOUT
-        // =========================
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
 
             if (!connected) {
@@ -340,31 +338,10 @@ public class MainActivity extends AppCompatActivity {
                 txtStatus.setText(getString(R.string.status_failed));
                 txtStatus.setTextColor(Color.RED);
 
-                // 🔴 ไม่ reconnect อัตโนมัติแล้ว
                 updateButtonState();
             }
 
         }, CONNECT_TIMEOUT);
-    }
-
-    private void scheduleReconnect() {
-
-        // =========================
-        // 🔴 SAFE MODE: ปิด auto reconnect กัน crash loop
-        // =========================
-
-        // 🔴 reset state
-        connecting = false;
-
-        // 🔴 หยุด reconnect ทั้งหมด
-        if (reconnectRunnable != null) {
-            reconnectHandler.removeCallbacks(reconnectRunnable);
-            reconnectRunnable = null;
-        }
-
-        // 🔴 แจ้งสถานะให้ user กดเอง
-        txtStatus.setText("CONNECT FAILED (PRESS CONNECT)");
-        txtStatus.setTextColor(Color.RED);
     }
 
     private void stopReconnect() {
@@ -423,10 +400,6 @@ public class MainActivity extends AppCompatActivity {
     private void updateButtonState() {
         btnConnect.setEnabled(!connected && !connecting);
         btnDisconnect.setEnabled(connected);
-    }
-
-    private void updateStatusText(String status) {
-        txtStatus.setText(status);
     }
 
     @Override
