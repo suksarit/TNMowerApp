@@ -74,14 +74,12 @@ public class BluetoothService extends Service {
         btAdapter = BluetoothAdapter.getDefaultAdapter();
         startForegroundService();
         // 🔴 กัน thread ซ้อน
-        if (!running.get()) {
-            running.set(true);
-
+        if (running.compareAndSet(false, true)) {
             new Thread(() -> {
                 try {
                     connectionLoop();
                 } catch (Throwable ignored) {}
-            }).start();
+            }, "BT-CONN").start();
         }
     }
 
@@ -112,7 +110,7 @@ public class BluetoothService extends Service {
             }
         }
 
-        return START_NOT_STICKY;
+        return START_STICKY;
     }
 
     // =========================

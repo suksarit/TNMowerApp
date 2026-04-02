@@ -109,6 +109,14 @@ public class MainActivity extends AppCompatActivity {
         public void onServiceDisconnected(ComponentName name) {
             isBound = false;
             btService = null;
+
+            connected = false;
+            connecting = false;
+
+            txtStatus.setText("SERVICE LOST");
+            txtStatus.setTextColor(Color.RED);
+
+            updateButtonState();
         }
     };
     // DEVICE SELECT
@@ -225,6 +233,23 @@ public class MainActivity extends AppCompatActivity {
     // =========================
     // 🔴 สำคัญ: listener ต้องอยู่ใน onStart
     // =========================
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+
+        try {
+            if (isBound) {
+                unbindService(serviceConnection);
+                isBound = false;
+            }
+        } catch (Exception ignored) {}
+
+        try {
+            stopService(new Intent(this, BluetoothService.class));
+        } catch (Exception ignored) {}
+    }
+
     @Override
     protected void onStart() {
         super.onStart();
@@ -306,10 +331,7 @@ public class MainActivity extends AppCompatActivity {
         intent.putExtra("MAC", mac);
 
         try {
-            // 🔴 เริ่ม service อย่างปลอดภัย
             startService(intent);
-
-            // 🔴 bind แบบกัน crash
             boolean ok = bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
 
             if (!ok) {
