@@ -13,9 +13,7 @@
         android:layout_height="wrap_content"
         android:text="@string/default_voltage"
         android:textSize="28sp"
-
-
-
+        app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"/>
 
@@ -110,6 +108,17 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginStart="8dp"/>
 
+    <!-- 🔴 RETRY -->
+    <Button
+        android:id="@+id/btnRetry"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="RETRY"
+        app:layout_constraintTop_toBottomOf="@id/btnDisconnect"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="8dp"/>
+
     <!-- 🔴 STOP -->
     <Button
         android:id="@+id/btnStop"
@@ -118,7 +127,7 @@
         android:text="@string/btn_stop"
         android:textColor="#FFFFFF"
         android:backgroundTint="#D32F2F"
-        app:layout_constraintTop_toBottomOf="@id/btnConnect"
+        app:layout_constraintTop_toBottomOf="@id/btnRetry"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="12dp"/>

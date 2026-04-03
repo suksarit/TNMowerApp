@@ -57,6 +57,8 @@ public class BluetoothService extends Service {
     private int retryCount = 0;
     private byte lastCmdSent = 0;
 
+    private Thread rxThread = null;
+
     public static void setTelemetryListener(OnTelemetryListener listener) {
         telemetryListener = listener;
     }
@@ -276,7 +278,7 @@ public class BluetoothService extends Service {
     private synchronized void connect() {
 
         // =========================
-        // 🔴 กัน connect ซ้อนจริง (ระดับ production)
+        // 🔴 กัน connect ซ้อน (production)
         // =========================
         if (connected.get() || connecting.get()) {
             return;
@@ -284,7 +286,7 @@ public class BluetoothService extends Service {
 
         connecting.set(true);
 
-        // 🔴 reset state ทุกครั้ง
+        // 🔴 reset state
         connected.set(false);
         waitingAck = -1;
         retryCount = 0;
@@ -292,10 +294,18 @@ public class BluetoothService extends Service {
         // 🔴 ปิดของเก่าทั้งหมด
         safeClose();
 
+        // 🔴 kill thread เก่า (สำคัญมาก)
+        try {
+            if (rxThread != null && rxThread.isAlive()) {
+                rxThread.interrupt();
+                rxThread = null;
+            }
+        } catch (Exception ignored) {}
+
         try {
 
             // =========================
-            // 🔴 Permission check
+            // 🔴 Permission
             // =========================
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 if (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
@@ -318,7 +328,7 @@ public class BluetoothService extends Service {
             btAdapter.cancelDiscovery();
 
             // =========================
-            // 🔴 GET DEVICE
+            // 🔴 DEVICE
             // =========================
             BluetoothDevice device;
             try {
@@ -330,7 +340,7 @@ public class BluetoothService extends Service {
             }
 
             // =========================
-            // 🔴 CREATE SOCKET
+            // 🔴 SOCKET
             // =========================
             try {
                 socket = device.createRfcommSocketToServiceRecord(UUID_SPP);
@@ -341,22 +351,16 @@ public class BluetoothService extends Service {
             }
 
             // =========================
-            // 🔴 CONNECT (กันค้าง + crash)
+            // 🔴 CONNECT
             // =========================
             try {
-
-                // 🔴 กัน connect ค้าง
                 socket.connect();
-
             } catch (IOException e) {
-
                 sendStatus("CONNECT_FAIL");
                 connecting.set(false);
                 safeClose();
                 return;
-
             } catch (Throwable t) {
-
                 sendStatus("CONNECT_FATAL");
                 connecting.set(false);
                 safeClose();
@@ -377,7 +381,7 @@ public class BluetoothService extends Service {
             }
 
             // =========================
-            // 🔴 HANDSHAKE (กัน edge case)
+            // 🔴 HANDSHAKE
             // =========================
             try {
 
@@ -448,9 +452,9 @@ public class BluetoothService extends Service {
             sendStatus("CONNECTED");
 
             // =========================
-            // 🔴 RX THREAD (กันซ้อน)
+            // 🔴 RX THREAD (FIX ตัวจริง)
             // =========================
-            new Thread(() -> {
+            rxThread = new Thread(() -> {
                 try {
                     rxLoop();
                 } catch (Throwable t) {
@@ -458,7 +462,9 @@ public class BluetoothService extends Service {
                     connected.set(false);
                     safeClose();
                 }
-            }, "BT-RX").start();
+            }, "BT-RX");
+
+            rxThread.start();
 
         } catch (Throwable t) {
 
@@ -740,7 +746,6 @@ public class BluetoothService extends Service {
             }
         } catch (Exception ignored) {}
 
-        // 🔴 RESET STATE (สำคัญ)
         connected.set(false);
     }
 

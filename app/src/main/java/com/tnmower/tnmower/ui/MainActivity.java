@@ -39,16 +39,21 @@ public class MainActivity extends AppCompatActivity {
     private TextView txtTempL, txtTempR;
     private TextView txtM1, txtM2, txtM3, txtM4;
 
-    private Button btnConnect, btnDisconnect, btnStop;
+    private Button btnConnect, btnDisconnect, btnStop, btnRetry;
 
     private String selectedMAC = "";
 
     private boolean connected = false;
     private boolean connecting = false;
 
+    private boolean isReceiverRegistered = false;
+
     private Runnable reconnectRunnable;
+
     // =========================
-// 🔴 STATUS RECEIVER (SAFE)
+// 🔴 STATUS RECEIVER (UI PRO)
+// FILE: MainActivity.java
+// SECTION: Global variable
 // =========================
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override
@@ -57,38 +62,55 @@ public class MainActivity extends AppCompatActivity {
             String status = intent.getStringExtra("status");
             if (status == null) return;
 
-            // 🔴 บังคับให้ทำงานบน UI Thread เท่านั้น
-            MainActivity.this.runOnUiThread(() -> {
+            runOnUiThread(() -> {
 
-                if ("CONNECTED".equals(status)) {
+                switch (status) {
 
-                    connected = true;
-                    connecting = false;
+                    case "CONNECTED":
+                        connected = true;
+                        connecting = false;
 
-                    stopReconnect();
+                        txtStatus.setText("CONNECTED");
+                        txtStatus.setTextColor(Color.GREEN);
+                        break;
 
-                    txtStatus.setText("CONNECTED");
-                    txtStatus.setTextColor(Color.GREEN);
+                    case "CONNECTING":
+                        txtStatus.setText("CONNECTING...");
+                        txtStatus.setTextColor(Color.YELLOW);
+                        break;
 
-                } else if ("DISCONNECTED".equals(status)) {
+                    case "CONNECT_FAIL":
+                    case "HANDSHAKE_FAIL":
+                    case "RECONNECT_FAIL":
+                    case "NO_PERMISSION":
+                    case "INVALID_MAC":
 
-                    connected = false;
-                    connecting = false;
+                        connected = false;
+                        connecting = false;
 
-                    stopReconnect();
+                        txtStatus.setText("ERROR: " + status);
+                        txtStatus.setTextColor(Color.RED);
+                        break;
 
-                    txtStatus.setText("DISCONNECTED");
-                    txtStatus.setTextColor(Color.RED);
+                    case "DISCONNECTED":
+                        connected = false;
+                        connecting = false;
 
-                } else {
+                        txtStatus.setText("DISCONNECTED");
+                        txtStatus.setTextColor(Color.RED);
+                        break;
 
-                    txtStatus.setText(status);
+                    default:
+                        txtStatus.setText(status);
+                        txtStatus.setTextColor(Color.GRAY);
+                        break;
                 }
 
                 updateButtonState();
             });
         }
     };
+
 
     private TelemetryData smoothData = null;
     private long lastUiUpdate = 0;
@@ -119,6 +141,7 @@ public class MainActivity extends AppCompatActivity {
             updateButtonState();
         }
     };
+
     // DEVICE SELECT
     // =========================
     private final ActivityResultLauncher<Intent> deviceLauncher =
@@ -191,18 +214,15 @@ public class MainActivity extends AppCompatActivity {
         }
 
         btnConnect.setOnClickListener(v -> {
+
             if (connecting || connected) return;
 
             if (!hasPermission()) {
-
                 requestBluetoothPermission();
-
-                Toast.makeText(this, "รออนุญาต Bluetooth ก่อน", Toast.LENGTH_SHORT).show();
-
-                return;   // 🔴 ห้ามเปิด DeviceList ทันที
+                Toast.makeText(this, "กรุณาอนุญาต Bluetooth ก่อน", Toast.LENGTH_SHORT).show();
+                return;
             }
 
-// 🔴 เปิดเฉพาะตอนมี permission แล้ว
             deviceLauncher.launch(new Intent(this, DeviceListActivity.class));
         });
 
@@ -210,19 +230,44 @@ public class MainActivity extends AppCompatActivity {
 
             stopReconnect();
 
-            if (btService != null) {
-                btService.sendStop();
-            }
+            try {
+                if (btService != null) {
+                    btService.sendStop();
+                }
+            } catch (Exception ignored) {}
 
-            stopService(new Intent(this, BluetoothService.class));
+            // 🔴 สำคัญ: unbind ก่อน
+            try {
+                if (isBound) {
+                    unbindService(serviceConnection);
+                    isBound = false;
+                }
+            } catch (Exception ignored) {}
+
+            // 🔴 แล้วค่อย stop service
+            try {
+                stopService(new Intent(this, BluetoothService.class));
+            } catch (Exception ignored) {}
 
             connected = false;
             connecting = false;
 
             updateButtonState();
 
-            txtStatus.setText(getString(R.string.status_disconnected));
+            txtStatus.setText("DISCONNECTED");
             txtStatus.setTextColor(Color.RED);
+        });
+
+        btnRetry = findViewById(R.id.btnRetry);
+
+        btnRetry.setOnClickListener(v -> {
+
+            if (connecting || isBound) return;
+
+            txtStatus.setText("READY");
+            txtStatus.setTextColor(Color.GRAY);
+
+            updateButtonState();
         });
 
         btnStop.setOnClickListener(v -> sendStopCommand());
@@ -362,13 +407,10 @@ public class MainActivity extends AppCompatActivity {
 
                 connecting = false;
 
-                txtStatus.setText(getString(R.string.status_failed));
+                txtStatus.setText("FAILED - PRESS CONNECT");
                 txtStatus.setTextColor(Color.RED);
 
                 updateButtonState();
-
-                // 🔴 เพิ่มตรงนี้: กลับไปเลือกใหม่
-                deviceLauncher.launch(new Intent(this, DeviceListActivity.class));
             }
 
         }, CONNECT_TIMEOUT);
@@ -430,6 +472,7 @@ public class MainActivity extends AppCompatActivity {
     private void updateButtonState() {
         btnConnect.setEnabled(!connected && !connecting);
         btnDisconnect.setEnabled(connected);
+        btnRetry.setEnabled(!connecting && !connected);
     }
 
     @Override
@@ -437,14 +480,20 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
 
         try {
-            IntentFilter filter = new IntentFilter("TNMOWER_STATUS");
 
-            ContextCompat.registerReceiver(
-                    this,
-                    statusReceiver,
-                    filter,
-                    ContextCompat.RECEIVER_NOT_EXPORTED
-            );
+            if (!isReceiverRegistered) {
+
+                IntentFilter filter = new IntentFilter("TNMOWER_STATUS");
+
+                ContextCompat.registerReceiver(
+                        this,
+                        statusReceiver,
+                        filter,
+                        ContextCompat.RECEIVER_NOT_EXPORTED
+                );
+
+                isReceiverRegistered = true;
+            }
 
         } catch (Exception ignored) {
         }
@@ -455,7 +504,10 @@ public class MainActivity extends AppCompatActivity {
         super.onPause();
 
         try {
-            unregisterReceiver(statusReceiver);
+            if (isReceiverRegistered) {
+                unregisterReceiver(statusReceiver);
+                isReceiverRegistered = false;
+            }
         } catch (Exception ignored) {
         }
     }
@@ -476,10 +528,11 @@ public class MainActivity extends AppCompatActivity {
             }
 
             if (granted) {
-                // ❌ ห้ามเปิด DeviceList อัตโนมัติ
-                Toast.makeText(this, "พร้อมใช้งาน Bluetooth แล้ว", Toast.LENGTH_SHORT).show();
+                txtStatus.setText("READY");
+                txtStatus.setTextColor(Color.GREEN);
             } else {
-                Toast.makeText(this, "ไม่ได้รับอนุญาต Bluetooth", Toast.LENGTH_SHORT).show();
+                txtStatus.setText("NO PERMISSION");
+                txtStatus.setTextColor(Color.RED);
             }
         }
     }
