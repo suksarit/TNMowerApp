@@ -38,6 +38,8 @@ public class BluetoothService extends Service {
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean connected = new AtomicBoolean(false);
     private final AtomicBoolean connecting = new AtomicBoolean(false);
+
+    private final AtomicBoolean isStopping = new AtomicBoolean(false); // 🔴 กัน stopSelf ซ้ำ
     private final AtomicBoolean processingQueue = new AtomicBoolean(false);
     private final IBinder binder = new LocalBinder();
     private final ConcurrentLinkedQueue<Byte> commandQueue = new ConcurrentLinkedQueue<>();
@@ -293,6 +295,7 @@ public class BluetoothService extends Service {
         retryCount = 0;
 
         safeClose();
+        SystemClock.sleep(200);
 
         // 🔴 kill RX thread เก่า
         try {
@@ -323,7 +326,11 @@ public class BluetoothService extends Service {
             return;
         }
 
-        btAdapter.cancelDiscovery();
+        try {
+            if (btAdapter.isDiscovering()) {
+                btAdapter.cancelDiscovery();
+            }
+        } catch (Exception ignored) {}
 
         BluetoothDevice device;
         try {
@@ -369,7 +376,6 @@ public class BluetoothService extends Service {
                     return;
                 }
 
-                // 🔴 reset fail count เมื่อสำเร็จ
                 reconnectFailCount = 0;
 
                 handleConnected(tmpSocket);
@@ -387,31 +393,29 @@ public class BluetoothService extends Service {
 
                 safeClose();
 
-                // =========================
-                // 🔴 FIX: จำกัดจำนวน fail
-                // =========================
                 reconnectFailCount++;
 
-                // 🔴 ถ้าผิดซ้ำ → หยุด service เลย (กัน crash + loop)
                 if (reconnectFailCount >= 3) {
 
                     sendStatus("STOPPED");
 
-                    try {
-                        stopSelf();   // 🔥 ตัด loop ทิ้งทันที
-                    } catch (Exception ignored) {}
+                    // 🔴 FIX: กัน stopSelf ซ้ำ (CONNECT thread)
+                    if (!isStopping.getAndSet(true)) {
+                        try {
+                            stopSelf();
+                        } catch (Exception ignored) {}
+                    }
 
                     return;
                 }
 
-                // 🔴 หน่วงก่อน loop รอบถัดไป
                 SystemClock.sleep(500);
             }
 
         }, "BT-CONNECT").start();
 
         // =========================
-        // 🔴 TIMEOUT THREAD (FIX race)
+        // 🔴 TIMEOUT THREAD
         // =========================
         new Thread(() -> {
 
@@ -433,16 +437,18 @@ public class BluetoothService extends Service {
 
                 safeClose();
 
-                // 🔴 นับ fail ด้วย (สำคัญ)
                 reconnectFailCount++;
 
                 if (reconnectFailCount >= 3) {
 
                     sendStatus("STOPPED");
 
-                    try {
-                        stopSelf();
-                    } catch (Exception ignored) {}
+                    // 🔴 FIX: กัน stopSelf ซ้ำ (TIMEOUT thread)
+                    if (!isStopping.getAndSet(true)) {
+                        try {
+                            stopSelf();
+                        } catch (Exception ignored) {}
+                    }
                 }
             }
 
