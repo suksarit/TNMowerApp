@@ -29,7 +29,7 @@ import android.annotation.SuppressLint;
 
 @SuppressLint("MissingPermission")
 public class BluetoothService extends Service {
-
+    private final AtomicBoolean serviceAlive = new AtomicBoolean(true);
     private volatile long currentConnectSession = 0;
     private static final String CHANNEL_ID = "TN_MOWER_BT";
     private static final long RX_TIMEOUT = 3000;
@@ -166,7 +166,7 @@ public class BluetoothService extends Service {
 
         long lastReconnectAttempt = 0;
 
-        while (running.get()) {
+        while (running.get() && serviceAlive.get()) {
 
             try {
 
@@ -417,6 +417,12 @@ public class BluetoothService extends Service {
 
                 finalSocket.connect();
 
+// 🔴 กัน service ตายระหว่าง connect
+                if (!serviceAlive.get()) {
+                    try { finalSocket.close(); } catch (Throwable ignored) {}
+                    return;
+                }
+
                 if (sessionId != currentConnectSession) {
                     try { finalSocket.close(); } catch (Throwable ignored) {}
                     return;
@@ -437,6 +443,11 @@ public class BluetoothService extends Service {
                 sameDeviceFailCount = 0;
                 lastFailedMAC = "";
                 reconnectFailCount = 0;
+
+                if (!serviceAlive.get()) {
+                    try { finalSocket.close(); } catch (Throwable ignored) {}
+                    return;
+                }
 
                 handleConnected(finalSocket);
 
@@ -475,9 +486,12 @@ public class BluetoothService extends Service {
 
                     sendStatus("STOPPED");
 
-                    if (!isStopping.getAndSet(true)) {
-                        try { stopSelf(); } catch (Exception ignored) {}
-                    }
+                    new Thread(() -> {
+                        SystemClock.sleep(300);
+                        if (!isStopping.getAndSet(true)) {
+                            try { stopSelf(); } catch (Exception ignored) {}
+                        }
+                    }).start();
 
                     return;
                 }
@@ -493,7 +507,7 @@ public class BluetoothService extends Service {
         // 🔴 TIMEOUT (ปรับใหม่)
         // =========================
         new Thread(() -> {
-
+            if (!serviceAlive.get()) return;
             SystemClock.sleep(3000); // 🔴 เพิ่มความเสถียร
 
             if (sessionId != currentConnectSession) return;
@@ -520,9 +534,12 @@ public class BluetoothService extends Service {
 
                     sendStatus("STOPPED");
 
-                    if (!isStopping.getAndSet(true)) {
-                        try { stopSelf(); } catch (Exception ignored) {}
-                    }
+                    new Thread(() -> {
+                        SystemClock.sleep(300);
+                        if (!isStopping.getAndSet(true)) {
+                            try { stopSelf(); } catch (Exception ignored) {}
+                        }
+                    }).start();
                 }
             }
 
@@ -915,7 +932,13 @@ public class BluetoothService extends Service {
 
     private void sendStatus(String status) {
 
+        // 🔴 กันยิงหลัง Service ตาย (สำคัญมาก)
+        if (!serviceAlive.get()) return;
+
+        // 🔴 กัน null
         if (status == null) return;
+
+        // 🔴 กัน spam ซ้ำ
         if (status.equals(lastStatus)) return;
 
         lastStatus = status;
@@ -925,7 +948,10 @@ public class BluetoothService extends Service {
             Intent intent = new Intent("TNMOWER_STATUS");
             intent.putExtra("status", status);
 
-            // 🔴 FIX: ใช้ ContextCompat → ปลอดภัย Android 13+
+            // 🔴 กัน context พัง
+            if (getApplicationContext() == null) return;
+
+            // 🔴 Android 13+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
 
                 sendBroadcast(intent, null);
@@ -995,10 +1021,24 @@ public class BluetoothService extends Service {
 
     @Override
     public void onDestroy() {
+
+        serviceAlive.set(false); // 🔴 สำคัญ
+
         running.set(false);
         connected.set(false);
+        connecting.set(false);
+
+        try {
+            if (rxThread != null) {
+                rxThread.interrupt();
+                rxThread = null;
+            }
+        } catch (Exception ignored) {}
+
         safeClose();
+
         sendStatus("DISCONNECTED");
+
         super.onDestroy();
     }
 
