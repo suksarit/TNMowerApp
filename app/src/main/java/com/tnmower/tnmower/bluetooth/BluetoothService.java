@@ -690,7 +690,7 @@ public class BluetoothService extends Service {
 
             try {
 
-                while (connected.get()) {
+                while (connected.get() && serviceAlive.get()) {
 
                     if (input == null) break;
 
@@ -708,6 +708,12 @@ public class BluetoothService extends Service {
 
             } finally {
 
+                try {
+                    sock.close(); // 🔴 บังคับหลุด read()
+                } catch (Exception ignored) {}
+
+                if (!serviceAlive.get()) return;
+
                 connected.set(false);
                 connecting.set(false);
                 safeClose();
@@ -723,7 +729,7 @@ public class BluetoothService extends Service {
 
         byte[] buffer = new byte[32];
 
-        while (running.get() && connected.get()) {
+        while (running.get() && connected.get() && serviceAlive.get()){
 
             try {
 
@@ -1022,12 +1028,36 @@ public class BluetoothService extends Service {
     @Override
     public void onDestroy() {
 
-        serviceAlive.set(false); // 🔴 สำคัญ
-
+        // 🔴 1. ปิดสถานะก่อน (หยุดทุก loop)
+        serviceAlive.set(false);
         running.set(false);
         connected.set(false);
         connecting.set(false);
 
+        // 🔴 2. บังคับ kill socket (สำคัญที่สุด)
+        try {
+            if (socket != null) {
+                socket.close(); // 🔥 ทำให้ input.read() หลุดทันที
+                socket = null;
+            }
+        } catch (Exception ignored) {}
+
+        // 🔴 3. ปิด stream กันค้าง
+        try {
+            if (input != null) {
+                input.close();
+                input = null;
+            }
+        } catch (Exception ignored) {}
+
+        try {
+            if (output != null) {
+                output.close();
+                output = null;
+            }
+        } catch (Exception ignored) {}
+
+        // 🔴 4. kill RX thread
         try {
             if (rxThread != null) {
                 rxThread.interrupt();
@@ -1035,9 +1065,17 @@ public class BluetoothService extends Service {
             }
         } catch (Exception ignored) {}
 
+        // 🔴 5. เคลียร์ state
+        waitingAck = -1;
+        retryCount = 0;
+        commandQueue.clear();
+
+        // 🔴 6. ปิดซ้ำอีกรอบกันหลุด (double safety)
         safeClose();
 
-        sendStatus("DISCONNECTED");
+        // 🔴 ❗ 7. ห้ามเรียก sendStatus หลัง serviceAlive=false
+        // (ของเดิมคุณมี → เป็นจุดเสี่ยง crash)
+        // sendStatus("DISCONNECTED");  ❌ ลบทิ้ง
 
         super.onDestroy();
     }
