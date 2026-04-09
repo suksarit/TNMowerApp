@@ -25,9 +25,12 @@ import java.io.OutputStream;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import android.annotation.SuppressLint;
 
+@SuppressLint("MissingPermission")
 public class BluetoothService extends Service {
 
+    private volatile long currentConnectSession = 0;
     private static final String CHANNEL_ID = "TN_MOWER_BT";
     private static final long RX_TIMEOUT = 3000;
     private static final long RESEND_INTERVAL = 300;
@@ -55,12 +58,22 @@ public class BluetoothService extends Service {
     private int txSeq = 0;
     private int waitingAck = -1;
     private int reconnectFailCount = 0; // 🔴 นับจำนวน reconnect fail
+    // 🔴 Industrial control
+    private long lastBtResetTime = 0;
+    private static final long BT_RESET_COOLDOWN = 15000; // กัน reset ถี่
+
+    private String lastFailedMAC = "";
+    private int sameDeviceFailCount = 0;
+
+    private static final int MAX_FAIL_BEFORE_BLOCK = 3;
+    private static final int MAX_FAIL_BEFORE_BT_RESET = 6;
     private long lastCmdTime = 0;
     private int retryCount = 0;
     private byte lastCmdSent = 0;
     private Thread rxThread = null;
     // 🔴 FIX: กัน connect ซ้อน / race
-    private volatile long currentConnectSession = 0;
+
+
 
     public static void setTelemetryListener(OnTelemetryListener listener) {
         telemetryListener = listener;
@@ -279,25 +292,25 @@ public class BluetoothService extends Service {
 // 🔴 FUNCTION: connect() (FINAL - NO CRASH / NO HANG)
 // FILE: BluetoothService.java
 // =========================
+    @SuppressLint("MissingPermission")
     private synchronized void connect() {
 
-        // 🔴 กันเรียกซ้อน
         if (connected.get() || connecting.get()) return;
 
-        // 🔴 FIX: session กัน thread เก่า
+        isStopping.set(false);
+
         final long sessionId = System.currentTimeMillis();
         currentConnectSession = sessionId;
 
         connecting.set(true);
-
         connected.set(false);
+
         waitingAck = -1;
         retryCount = 0;
 
         safeClose();
         SystemClock.sleep(200);
 
-        // 🔴 kill RX thread เก่า
         try {
             if (rxThread != null && rxThread.isAlive()) {
                 rxThread.interrupt();
@@ -320,8 +333,8 @@ public class BluetoothService extends Service {
 
         sendStatus("CONNECTING");
 
-        if (btAdapter == null) {
-            sendStatus("NO_BT");
+        if (btAdapter == null || !btAdapter.isEnabled()) {
+            sendStatus("BT_OFF");
             connecting.set(false);
             return;
         }
@@ -330,9 +343,10 @@ public class BluetoothService extends Service {
             if (btAdapter.isDiscovering()) {
                 btAdapter.cancelDiscovery();
             }
-        } catch (Exception ignored) {}
+        } catch (Throwable ignored) {}
 
         BluetoothDevice device;
+
         try {
             device = btAdapter.getRemoteDevice(MAC);
         } catch (Throwable e) {
@@ -341,44 +355,90 @@ public class BluetoothService extends Service {
             return;
         }
 
-        final BluetoothSocket tmpSocket;
-        try {
-            tmpSocket = device.createRfcommSocketToServiceRecord(UUID_SPP);
-        } catch (Throwable e) {
-            sendStatus("SOCKET_FAIL");
+        // =========================
+        // 🔴 FILTER DEVICE (ปรับใหม่)
+        // =========================
+        String name = null;
+        int type = BluetoothDevice.DEVICE_TYPE_UNKNOWN;
+
+        try { name = device.getName(); } catch (Throwable ignored) {}
+        try { type = device.getType(); } catch (Throwable ignored) {}
+
+        // 🔴 กัน BLE
+        if (type == BluetoothDevice.DEVICE_TYPE_LE) {
+            sendStatus("BLE_DEVICE");
+            connecting.set(false);
+            return;
+        }
+
+        // 🔴 กัน device แปลก (แต่ไม่ล็อค HC อย่างเดียว)
+        if (type != BluetoothDevice.DEVICE_TYPE_CLASSIC &&
+                type != BluetoothDevice.DEVICE_TYPE_DUAL) {
+
+            sendStatus("INVALID_DEVICE");
             connecting.set(false);
             return;
         }
 
         // =========================
-        // 🔴 CONNECT THREAD
+        // 🔴 BLACKLIST
         // =========================
-        new Thread(() -> {
+        if (MAC.equals(lastFailedMAC) && sameDeviceFailCount >= MAX_FAIL_BEFORE_BLOCK) {
+            sendStatus("DEVICE_BLOCKED");
+            connecting.set(false);
+            return;
+        }
+
+        BluetoothSocket tmpSocket = null;
+
+        try {
+            tmpSocket = device.createRfcommSocketToServiceRecord(UUID_SPP);
+        } catch (Throwable ignored) {}
+
+        if (tmpSocket == null) {
+            try {
+                tmpSocket = (BluetoothSocket) device.getClass()
+                        .getMethod("createRfcommSocket", int.class)
+                        .invoke(device, 1);
+            } catch (Throwable ignored) {}
+        }
+
+        if (tmpSocket == null) {
+            sendStatus("SOCKET_FAIL");
+            connecting.set(false);
+            return;
+        }
+
+        final BluetoothSocket finalSocket = tmpSocket;
+
+        Thread connectThread = new Thread(() -> {
 
             try {
 
-                tmpSocket.connect();
+                finalSocket.connect();
 
-                // 🔴 กัน thread เก่า
                 if (sessionId != currentConnectSession) {
-                    try { tmpSocket.close(); } catch (Throwable ignored) {}
+                    try { finalSocket.close(); } catch (Throwable ignored) {}
                     return;
                 }
 
                 if (!connecting.get()) {
-                    try { tmpSocket.close(); } catch (Throwable ignored) {}
+                    try { finalSocket.close(); } catch (Throwable ignored) {}
                     return;
                 }
 
-                if (!tmpSocket.isConnected()) {
+                if (!finalSocket.isConnected()) {
                     connecting.set(false);
                     safeClose();
                     return;
                 }
 
+                // 🔴 SUCCESS
+                sameDeviceFailCount = 0;
+                lastFailedMAC = "";
                 reconnectFailCount = 0;
 
-                handleConnected(tmpSocket);
+                handleConnected(finalSocket);
 
             } catch (Throwable e) {
 
@@ -388,22 +448,35 @@ public class BluetoothService extends Service {
                 connected.set(false);
 
                 try {
-                    if (tmpSocket != null) tmpSocket.close();
+                    finalSocket.close();
+                    SystemClock.sleep(100); // 🔴 FIX native ค้าง
                 } catch (Throwable ignored) {}
 
                 safeClose();
 
                 reconnectFailCount++;
 
+                // 🔴 TRACK FAIL
+                if (MAC.equals(lastFailedMAC)) {
+                    sameDeviceFailCount++;
+                } else {
+                    lastFailedMAC = MAC;
+                    sameDeviceFailCount = 1;
+                }
+
+                // 🔴 RESET BT (กันพัง Android ใหม่)
+                if (sameDeviceFailCount >= MAX_FAIL_BEFORE_BT_RESET) {
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                        restartBluetoothAdapter();
+                    }
+                }
+
                 if (reconnectFailCount >= 3) {
 
                     sendStatus("STOPPED");
 
-                    // 🔴 FIX: กัน stopSelf ซ้ำ (CONNECT thread)
                     if (!isStopping.getAndSet(true)) {
-                        try {
-                            stopSelf();
-                        } catch (Exception ignored) {}
+                        try { stopSelf(); } catch (Exception ignored) {}
                     }
 
                     return;
@@ -412,16 +485,17 @@ public class BluetoothService extends Service {
                 SystemClock.sleep(500);
             }
 
-        }, "BT-CONNECT").start();
+        }, "BT-CONNECT");
+
+        connectThread.start();
 
         // =========================
-        // 🔴 TIMEOUT THREAD
+        // 🔴 TIMEOUT (ปรับใหม่)
         // =========================
         new Thread(() -> {
 
-            SystemClock.sleep(3000);
+            SystemClock.sleep(3000); // 🔴 เพิ่มความเสถียร
 
-            // 🔴 กัน thread เก่า
             if (sessionId != currentConnectSession) return;
 
             if (connecting.get() && !connected.get()) {
@@ -429,8 +503,11 @@ public class BluetoothService extends Service {
                 sendStatus("CONNECT_TIMEOUT");
 
                 try {
-                    if (tmpSocket != null) tmpSocket.close();
+                    finalSocket.close();
+                    SystemClock.sleep(100); // 🔴 FIX native
                 } catch (Throwable ignored) {}
+
+                try { connectThread.interrupt(); } catch (Throwable ignored) {}
 
                 connecting.set(false);
                 connected.set(false);
@@ -443,11 +520,8 @@ public class BluetoothService extends Service {
 
                     sendStatus("STOPPED");
 
-                    // 🔴 FIX: กัน stopSelf ซ้ำ (TIMEOUT thread)
                     if (!isStopping.getAndSet(true)) {
-                        try {
-                            stopSelf();
-                        } catch (Exception ignored) {}
+                        try { stopSelf(); } catch (Exception ignored) {}
                     }
                 }
             }
@@ -891,6 +965,32 @@ public class BluetoothService extends Service {
 
         connected.set(false);
         connecting.set(false);
+    }
+
+    // =========================
+// 🔴 FUNCTION: restartBluetoothAdapter()
+// =========================
+    private void restartBluetoothAdapter() {
+
+        try {
+
+            if (btAdapter == null) return;
+
+            long now = System.currentTimeMillis();
+
+            if (now - lastBtResetTime < BT_RESET_COOLDOWN) {
+                return; // 🔴 กัน reset รัว
+            }
+
+            lastBtResetTime = now;
+
+            sendStatus("BT_RESET");
+
+            btAdapter.disable();
+            SystemClock.sleep(1500);
+            btAdapter.enable();
+
+        } catch (Throwable ignored) {}
     }
 
     @Override
