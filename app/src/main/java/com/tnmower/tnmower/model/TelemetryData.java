@@ -3,14 +3,24 @@ package com.tnmower.tnmower.model;
 public class TelemetryData {
 
     // =========================
-    // 🔴 LIMIT (ปรับได้)
+    // 🔴 LIMIT (ให้ตรง Arduino)
     // =========================
     private static final float MAX_VOLT = 60f;
-    private static final float MAX_CURRENT = 100f;
+    private static final float MAX_CURRENT = 150f;
     private static final float MAX_TEMP = 120f;
 
     // =========================
-    // 🔴 FLAGS + ERROR (เพิ่มใหม่)
+    // 🔴 SEQUENCE
+    // =========================
+    public int seq;
+
+    // =========================
+    // 🔴 TIME (เพิ่มใหม่)
+    // =========================
+    public long timestamp;
+
+    // =========================
+    // 🔴 FLAGS + ERROR
     // =========================
     public int flags;
     public int error;
@@ -29,9 +39,9 @@ public class TelemetryData {
     public float tempR;
 
     // ==================================================
-    // 🔴 CONSTRUCTOR (แก้ใหม่ทั้งหมด)
+    // 🔴 CONSTRUCTOR
     // ==================================================
-    public TelemetryData(int flags, int error,
+    public TelemetryData(int seq, int flags, int error,
                          float volt,
                          float m1,
                          float m2,
@@ -40,11 +50,13 @@ public class TelemetryData {
                          float tempL,
                          float tempR) {
 
-        // 🔴 เก็บ flags + error
+        this.seq = seq;
         this.flags = flags;
         this.error = error;
 
-        // 🔴 sanitize ค่า
+        // 🔴 timestamp ตอนรับ packet
+        this.timestamp = System.currentTimeMillis();
+
         this.volt = clamp(volt, 0, MAX_VOLT);
 
         this.m1 = clamp(m1, 0, MAX_CURRENT);
@@ -68,7 +80,7 @@ public class TelemetryData {
     }
 
     // ==================================================
-    // 🔴 SYSTEM STATUS (ใช้ flags)
+    // 🔴 SYSTEM STATUS
     // ==================================================
     public boolean isLocked() {
         return (flags & 0x01) != 0;
@@ -106,6 +118,28 @@ public class TelemetryData {
     }
 
     // ==================================================
+    // 🔴 SENSOR FAULT (เพิ่มใหม่)
+    // ==================================================
+    public boolean hasSensorFault() {
+        return m1 < 0 || m2 < 0 || m3 < 0 || m4 < 0;
+    }
+
+    // ==================================================
+    // 🔴 SEQ CHECK
+    // ==================================================
+    public boolean isSeqJump(int lastSeq) {
+        int diff = (seq - lastSeq) & 0xFF;
+        return diff > 1;
+    }
+
+    // ==================================================
+    // 🔴 STALE DATA CHECK (สำคัญมาก)
+    // ==================================================
+    public boolean isStale(long now) {
+        return (now - timestamp) > 500;
+    }
+
+    // ==================================================
     // 🔴 VALIDATION
     // ==================================================
     public boolean isValid() {
@@ -122,8 +156,10 @@ public class TelemetryData {
     // 🔴 CLAMP
     // ==================================================
     private float clamp(float v, float min, float max) {
+        if (Float.isNaN(v) || Float.isInfinite(v)) return min;
         if (v < min) return min;
         if (v > max) return max;
         return v;
     }
 }
+
